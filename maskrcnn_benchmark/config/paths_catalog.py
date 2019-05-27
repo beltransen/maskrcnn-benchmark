@@ -103,12 +103,28 @@ class DatasetCatalog(object):
         "cityscapes_fine_instanceonly_seg_test_cocostyle": {
             "img_dir": "cityscapes/images",
             "ann_file": "cityscapes/annotations/instancesonly_filtered_gtFine_test.json"
+        },
+        "kitti_train": {
+            "img_dir": "kitti/object/training/image_2",
+            "ann_file": "kitti/object/coco_anns/annotations_kitti_training.json"
+        },
+        "kitti_val": {
+            "img_dir": "kitti/object/training/image_2",
+            "ann_file": "kitti/object/coco_anns/annotations_kitti_validation.json"
+        },
+        "kitti_train_crowd": {
+            "img_dir": "kitti/object/training/image_2",
+            "ann_file": "kitti/object/coco_anns/annotations_crowd_kitti_training.json"
+        },
+        "kitti_val_crowd": {
+            "img_dir": "kitti/object/training/image_2",
+            "ann_file": "kitti/object/coco_anns/annotations_crowd_kitti_validation.json"
         }
     }
 
     @staticmethod
     def get(name):
-        if "coco" in name:
+        if "coco" in name or 'kitti' in name:
             data_dir = DatasetCatalog.DATA_DIR
             attrs = DatasetCatalog.DATASETS[name]
             args = dict(
