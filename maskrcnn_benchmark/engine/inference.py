@@ -4,6 +4,7 @@ import time
 import os
 
 import torch
+import numpy as np
 from tqdm import tqdm
 
 from maskrcnn_benchmark.data.datasets.evaluation import evaluate
@@ -65,7 +66,7 @@ def inference(
         device="cuda",
         expected_results=(),
         expected_results_sigma_tol=4,
-        output_folder=None,
+        output_folder=None, kitti_output=False
 ):
     # convert to a torch.device for efficiency
     device = torch.device(device)
@@ -77,6 +78,7 @@ def inference(
     inference_timer = Timer()
     total_timer.tic()
     predictions = compute_on_dataset(model, data_loader, device, inference_timer)
+
     # wait for all processes to complete before measuring the time
     synchronize()
     total_time = total_timer.toc()
@@ -95,12 +97,49 @@ def inference(
         )
     )
 
-    predictions = _accumulate_predictions_from_multiple_gpus(predictions)
+    predictions_multi = _accumulate_predictions_from_multiple_gpus(predictions)
     if not is_main_process():
         return
 
     if output_folder:
-        torch.save(predictions, os.path.join(output_folder, "predictions.pth"))
+        torch.save(predictions_multi, os.path.join(output_folder, "predictions.pth"))
+
+    if kitti_output:
+        CATEGORIES = [
+            "__background",
+            "Car",
+            "Pedestrian",
+            "Cyclist",
+        ]
+
+        # for image_id, prediction in enumerate(predictions):
+        for image_id in range(len(predictions.keys())):
+            original_id = dataset.id_to_img_map[image_id]
+            img_info = dataset.get_img_info(image_id)
+            image_width = img_info["width"]
+            image_height = img_info["height"]
+            prediction = predictions[image_id]
+            prediction = prediction.resize((image_width, image_height))
+            file_name = os.path.join(output_folder, 'det_results', '{0:06d}.txt'.format(original_id))
+            with open(file_name, 'w') as output_file:
+                scores = predictions[image_id].get_field("scores").tolist()
+                labels = predictions[image_id].get_field("labels").tolist()
+                labels = [CATEGORIES[i] for i in labels]
+                boxes = prediction.bbox
+                for box, score, label in zip(boxes, scores, labels):
+                    left, top, right, bottom = box
+                    if score > 0.0001:
+                        output_file.write(
+                            '{:s} {:.2f} {:d} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f}\n'.format(
+                                label, -1, -1, -10,  # type, truncated, occluded, alpha
+                                left, top, right, bottom,
+                                # bbox: left, top, right, bottom
+                                -1, -1, -1,  # dimensions: height, width, length
+                                -1, -1, -1,  # location: x,y,z
+                                -10, np.log(score)# rotation_y, score
+                            ))
+                    # print('{}: {} {} {} {} Score: {}'.format(label, left, top, right, bottom, score))
+            print('Saved results to ', file_name)
 
     extra_args = dict(
         box_only=box_only,
@@ -110,6 +149,6 @@ def inference(
     )
 
     return evaluate(dataset=dataset,
-                    predictions=predictions,
+                    predictions=predictions_multi,
                     output_folder=output_folder,
                     **extra_args)
