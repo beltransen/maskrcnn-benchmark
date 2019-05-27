@@ -26,6 +26,9 @@ inference/
 # Pycharm editor settings
 .idea
 
+# MacOS
+.DS_Store
+
 # project dirs
 /datasets
 /models
