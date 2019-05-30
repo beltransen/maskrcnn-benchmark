@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 from maskrcnn_benchmark.config import cfg
 from maskrcnn_benchmark.data.datasets.evaluation import evaluate
+from maskrcnn_benchmark.utils.miscellaneous import mkdir
 from ..utils.comm import is_main_process, get_world_size
 from ..utils.comm import all_gather
 from ..utils.comm import synchronize
@@ -20,7 +21,7 @@ def compute_on_dataset(model, data_loader, device, timer=None):
     model.eval()
     results_dict = {}
     cpu_device = torch.device("cpu")
-    for _, batch in enumerate(tqdm(data_loader)):
+    for idx, batch in enumerate(tqdm(data_loader)):
         images, targets, image_ids = batch
         with torch.no_grad():
             if timer:
@@ -115,7 +116,8 @@ def inference(
             "Pedestrian",
             "Cyclist",
         ]
-
+        output_folder = os.path.join(output_folder, 'det_results')
+        mkdir(output_folder)
         # for image_id, prediction in enumerate(predictions):
         for image_id in range(len(predictions.keys())):
             original_id = dataset.id_to_img_map[image_id]
@@ -124,10 +126,11 @@ def inference(
             image_height = img_info["height"]
             prediction = predictions[image_id]
             prediction = prediction.resize((image_width, image_height))
-            file_name = os.path.join(output_folder, 'det_results', '{0:06d}.txt'.format(original_id))
+            file_name = os.path.join(output_folder, '{0:06d}.txt'.format(original_id))
             with open(file_name, 'w') as output_file:
                 scores = predictions[image_id].get_field("scores").tolist()
                 labels = predictions[image_id].get_field("labels").tolist()
+                print(labels)
                 labels = [CATEGORIES[i] for i in labels]
                 boxes = prediction.bbox
                 for box, score, label in zip(boxes, scores, labels):
@@ -142,8 +145,6 @@ def inference(
                                 -1, -1, -1,  # location: x,y,z
                                 -10, np.log(score)# rotation_y, score
                             ))
-                    # print('{}: {} {} {} {} Score: {}'.format(label, left, top, right, bottom, score))
-            print('Saved results to ', file_name)
 
     extra_args = dict(
         box_only=box_only,
