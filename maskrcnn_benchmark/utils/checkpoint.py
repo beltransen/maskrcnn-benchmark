@@ -50,13 +50,15 @@ class Checkpointer(object):
         self.tag_last_checkpoint(save_file)
 
     def load(self, f=None):
-        if self.has_checkpoint():
-            # override argument with existing checkpoint
-            f = self.get_checkpoint_file()
-        if not f:
-            # no checkpoint could be found
-            self.logger.info("No checkpoint found. Initializing model from scratch")
-            return {}
+        if not f: # If not checkpoint file provided, load last checkpoint
+            if self.has_checkpoint():
+                # override argument with existing checkpoint
+                f = self.get_checkpoint_file()
+            if not f:
+                # no checkpoint could be found
+                self.logger.info("No checkpoint found. Initializing model from scratch")
+                return {}
+
         self.logger.info("Loading checkpoint from {}".format(f))
         checkpoint = self._load_file(f)
         self._load_model(checkpoint)
@@ -66,7 +68,6 @@ class Checkpointer(object):
         if "scheduler" in checkpoint and self.scheduler:
             self.logger.info("Loading scheduler from {}".format(f))
             self.scheduler.load_state_dict(checkpoint.pop("scheduler"))
-
         # return any further checkpoint data
         return checkpoint
 
