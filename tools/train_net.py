@@ -1,5 +1,5 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
-r"""
+"""
 Basic training script for PyTorch
 """
 
@@ -35,6 +35,7 @@ except ImportError:
 
 def train(cfg, local_rank, distributed):
     model = build_detection_model(cfg)
+    # print(model)
     device = torch.device(cfg.MODEL.DEVICE)
     model.to(device)
 
@@ -62,6 +63,8 @@ def train(cfg, local_rank, distributed):
     checkpointer = DetectronCheckpointer(
         cfg, model, optimizer, scheduler, output_dir, save_to_disk
     )
+
+    # if not cfg.NON_LOCAL.ENABLED:  # TODO Remove when weights loader supports 4D
     extra_checkpoint_data = checkpointer.load(cfg.MODEL.WEIGHT)
     arguments.update(extra_checkpoint_data)
 
@@ -83,6 +86,7 @@ def train(cfg, local_rank, distributed):
         device,
         checkpoint_period,
         arguments,
+        tensor4d=cfg.NON_LOCAL.ENABLED
     )
 
     return model
@@ -170,16 +174,16 @@ def main():
     logger.info("Collecting env info (might take some time)")
     logger.info("\n" + collect_env_info())
 
-    logger.info("Loaded configuration file {}".format(args.config_file))
-    with open(args.config_file, "r") as cf:
-        config_str = "\n" + cf.read()
-        logger.info(config_str)
-    logger.info("Running with config:\n{}".format(cfg))
+    logger.info("Loaded file {}".format(args.config_file))
+    # with open(args.config_file, "r") as cf:
+    #     config_str = "\n" + cf.read()
+    #     logger.info(config_str)
+    # logger.info("Running with config:\n{}".format(cfg))
 
     model = train(cfg, args.local_rank, args.distributed)
 
-    if not args.skip_test:
-        run_test(cfg, model, args.distributed)
+    # if not args.skip_test:
+    #     run_test(cfg, model, args.distributed)
 
 
 if __name__ == "__main__":

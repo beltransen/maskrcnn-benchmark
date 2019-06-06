@@ -16,7 +16,7 @@ OR:
 Custom implementations may be written in user code and hooked in via the
 `register_*` functions.
 """
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 
 import torch
 import torch.nn.functional as F
@@ -500,8 +500,8 @@ class ResNetNL(nn.Module):
         self.blocks1 = nn.ModuleList()
         self.nonlocals = nn.ModuleList()
         self.blocks2 = nn.ModuleList()
-        self.return_features = []
-        self.nl_block = []
+        self.return_features = {}
+        self.nl_block = {}
         for stage_spec in stage_specs:
             name = "layer" + str(stage_spec.index)
             stage2_relative_factor = 2 ** (stage_spec.index - 1)
@@ -513,7 +513,7 @@ class ResNetNL(nn.Module):
             # Part 1
             block1 = []
             stride = int(stage_spec.index > 1) + 1
-            for _ in range(stage_spec.block_count-2):
+            for _ in range(stage_spec.block_count-1):
                 block1.append(
                     transformation_module(
                         in_channels,
@@ -533,13 +533,13 @@ class ResNetNL(nn.Module):
                 stride = 1
                 in_channels = out_channels
 
-            self.blocks1.append(nn.Sequential(*block1))
+            self.blocks1.add_module(name, nn.Sequential(*block1))
 
             # NL
             if non_local_enabled:
-                self.nonlocals.append(NLB3D(out_channels, bottleneck_channels, 7, bn_layer=False))  # TODO Check
+                self.nonlocals.add_module(name, NLB3D(out_channels, bottleneck_channels, 7, bn_layer=False))  # TODO Check
             else:
-                self.nonlocals.append(Identity())
+                self.nonlocals.add_module(name, Identity())
 
             # Part 2
             block2 = transformation_module(
@@ -556,11 +556,11 @@ class ResNetNL(nn.Module):
                             "deformable_groups": cfg.MODEL.RESNETS.DEFORMABLE_GROUPS,
                         }
                     )
-            self.blocks2.append(block2)
+            self.blocks2.add_module(name, nn.Sequential(OrderedDict([(str(stage_spec.block_count-1), block2),])))
             # self.add_module(name, module)
             self.stages.append(name)
-            self.return_features.append(stage_spec.return_features)
-            self.nl_block.append(non_local_enabled)
+            self.return_features[name] = stage_spec.return_features
+            self.nl_block[name] = non_local_enabled
 
         # Optionally freeze (requires_grad=False) parts of the backbone
         self._freeze_backbone(cfg.MODEL.BACKBONE.FREEZE_CONV_BODY_AT)
@@ -574,15 +574,15 @@ class ResNetNL(nn.Module):
                 for p in m.parameters():
                     p.requires_grad = False
             else:
-                name = "layer" + str(stage_index)
-                m1 = self.blocks1[stage_index-1]
+                name = "layer" + str(stage_index+1)
+                m1 = getattr(self.blocks1, name)
                 for p in m1.parameters():
                     p.requires_grad = False
-                if self.nl_block[stage_index-1]:
-                    m2 = self.nonlocals[stage_index-1]
+                if self.nl_block[name]:
+                    m2 = getattr(self.nonlocals, name)
                     for p in m2.parameters():
                         p.requires_grad = False
-                m3 = self.blocks2[stage_index-1]
+                m3 = getattr(self.blocks2, name)
                 for p in m3.parameters():
                     p.requires_grad = False
 
@@ -595,18 +595,18 @@ class ResNetNL(nn.Module):
         for s in range(len(self.stages)):
             stage_name = self.stages[s]
             for i in range(x.shape[2]):
-                xs[i] = self.blocks1[s](xs[i])
+                xs[i] = getattr(self.blocks1, stage_name)(xs[i])
                 # print('Forward {}: {}'.format(stage_name, xs[i].shape))
 
-            if self.nl_block[s]:
+            if self.nl_block[stage_name]:  # TODO Remove: Not necessary? Either Identity or NL module
                 stacked = torch.stack(xs, 2)
                 # print('stacked size: ', stacked.shape)
-                xs[0] = self.nonlocals[s](stacked[:, :, 0:1, :, :], stacked[:, :, 1:, :, :])  # TODO Check
+                xs[0] = getattr(self.nonlocals, stage_name)(stacked[:, :, 0:1, :, :], stacked[:, :, 1:, :, :])  # TODO Check
 
             for i in range(x.shape[0]):
-                xs[i] = self.blocks2[s](xs[i])
+                xs[i] = getattr(self.blocks2, stage_name)(xs[i])
 
-            if self.return_features[s]:
+            if self.return_features[stage_name]:
                 outputs.append(xs[0])  # TODO Check
 
         # print('Resnet outputs: ', len(outputs))
@@ -643,7 +643,8 @@ class NLB3D(torch.nn.Module):
         else:
             self.W = torch.nn.Conv3d(in_channels=h_channels, out_channels=in_channels,
                                      kernel_size=1, stride=1, padding=0, bias=False)
-            torch.nn.init.xavier_uniform(self.W.weight)   # TODO Check correct initialization (Should be ZERO?)
+            # torch.nn.init.xavier_uniform(self.W.weight)   # TODO Check correct initialization (Should be ZERO?)
+            torch.nn.init.constant_(self.W.weight, 0)
 
     def forward(self, x, ctx):
         # print("NLB input: ", x.shape)
