@@ -2,6 +2,7 @@
 import datetime
 import logging
 import time
+import random
 
 import torch
 import torch.distributed as dist
@@ -45,6 +46,7 @@ def do_train(
     device,
     checkpoint_period,
     arguments,
+    tensor4d=False
 ):
     logger = logging.getLogger("maskrcnn_benchmark.trainer")
     logger.info("Start training")
@@ -62,6 +64,12 @@ def do_train(
         scheduler.step()
 
         images = images.to(device)
+        if tensor4d:
+            # print('Before: ', images.tensors.shape)
+            images.tensors = images.tensors.unsqueeze(2)
+            # images.tensors = images.tensors.repeat((1,1,random.randint(2, 6),1,1)) # TODO Replace by real images (random #frames test)
+            images.tensors = images.tensors.repeat((1,1,2,1,1))  # TODO Replace by real images
+            # print('After: ', images.tensors.shape)
         targets = [target.to(device) for target in targets]
 
         loss_dict = model(images, targets)

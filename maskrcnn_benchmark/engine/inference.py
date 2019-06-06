@@ -130,7 +130,6 @@ def inference(
             with open(file_name, 'w') as output_file:
                 scores = predictions[image_id].get_field("scores").tolist()
                 labels = predictions[image_id].get_field("labels").tolist()
-                print(labels)
                 labels = [CATEGORIES[i] for i in labels]
                 boxes = prediction.bbox
                 for box, score, label in zip(boxes, scores, labels):
