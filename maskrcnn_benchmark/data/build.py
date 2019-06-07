@@ -10,7 +10,7 @@ from maskrcnn_benchmark.utils.imports import import_file
 from . import datasets as D
 from . import samplers
 
-from .collate_batch import BatchCollator, BBoxAugCollator
+from .collate_batch import BatchCollator, BatchWithDepthCollator, BBoxAugCollator
 from .transforms import build_transforms
 
 
@@ -35,7 +35,7 @@ def build_dataset(dataset_list, transforms, dataset_catalog, is_train=True):
         args = data["args"]
         # for COCODataset, we want to remove images without annotations
         # during training
-        if data["factory"] == "COCODataset":
+        if data["factory"] == "COCODataset" or data["factory"] == "KITTIDataset":
             args["remove_images_without_annotations"] = is_train
         if data["factory"] == "PascalVOCDataset":
             args["use_difficult"] = not is_train
@@ -160,8 +160,13 @@ def make_data_loader(cfg, is_train=True, is_distributed=False, start_iter=0):
         batch_sampler = make_batch_data_sampler(
             dataset, sampler, aspect_grouping, images_per_gpu, num_iters, start_iter
         )
-        collator = BBoxAugCollator() if not is_train and cfg.TEST.BBOX_AUG.ENABLED else \
-            BatchCollator(cfg.DATALOADER.SIZE_DIVISIBILITY)
+
+        if cfg.NON_LOCAL.ENABLED:
+            collator = BBoxAugCollator() if not is_train and cfg.TEST.BBOX_AUG.ENABLED else \
+                BatchWithDepthCollator(cfg.DATALOADER.SIZE_DIVISIBILITY)
+        else:
+            collator = BBoxAugCollator() if not is_train and cfg.TEST.BBOX_AUG.ENABLED else \
+                BatchCollator(cfg.DATALOADER.SIZE_DIVISIBILITY)
         num_workers = cfg.DATALOADER.NUM_WORKERS
         data_loader = torch.utils.data.DataLoader(
             dataset,

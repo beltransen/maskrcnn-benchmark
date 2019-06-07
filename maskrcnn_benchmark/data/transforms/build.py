@@ -1,5 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 from . import transforms as T
+from . import transforms_batch as TB
 
 
 def build_transforms(cfg, is_train=True):
@@ -20,8 +21,12 @@ def build_transforms(cfg, is_train=True):
         saturation = 0.0
         hue = 0.0
 
+    if cfg.NON_LOCAL.ENABLED:  # Input is a 4D Tensor (Image sequences)
+        transformer = TB  # Apply the same transformations for a group of images stored in a list
+    else:
+        transformer = T  # Common single image transformations
     to_bgr255 = cfg.INPUT.TO_BGR255
-    normalize_transform = T.Normalize(
+    normalize_transform = transformer.Normalize(
         mean=cfg.INPUT.PIXEL_MEAN, std=cfg.INPUT.PIXEL_STD, to_bgr255=to_bgr255
     )
     color_jitter = T.ColorJitter(
@@ -31,12 +36,12 @@ def build_transforms(cfg, is_train=True):
         hue=hue,
     )
 
-    transform = T.Compose(
+    transform = transformer.Compose(
         [
             color_jitter,
-            T.Resize(min_size, max_size),
-            T.RandomHorizontalFlip(flip_prob),
-            T.ToTensor(),
+            transformer.Resize(min_size, max_size),
+            transformer.RandomHorizontalFlip(flip_prob),
+            transformer.ToTensor(),
             normalize_transform,
         ]
     )

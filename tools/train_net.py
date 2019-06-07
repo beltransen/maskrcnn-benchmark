@@ -86,7 +86,7 @@ def train(cfg, local_rank, distributed):
         device,
         checkpoint_period,
         arguments,
-        tensor4d=cfg.NON_LOCAL.ENABLED
+        # tensor4d=cfg.NON_LOCAL.ENABLED
     )
 
     return model

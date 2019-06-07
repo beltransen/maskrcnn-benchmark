@@ -3,7 +3,8 @@ import datetime
 import logging
 import time
 import random
-
+import cv2
+import numpy as np
 import torch
 import torch.distributed as dist
 
@@ -45,8 +46,7 @@ def do_train(
     checkpointer,
     device,
     checkpoint_period,
-    arguments,
-    tensor4d=False
+    arguments
 ):
     logger = logging.getLogger("maskrcnn_benchmark.trainer")
     logger.info("Start training")
@@ -63,13 +63,17 @@ def do_train(
 
         scheduler.step()
 
+        # Visualize images in input tensor
+        # for f in range(images.tensors.shape[2]):
+        #     img = images.tensors[0,:,f,:,:].numpy()
+        #     img = img * 255
+        #     img = img.astype(np.uint8)
+        #     img = np.moveaxis(img, 0, -1)
+        #     cv2.imshow('frame ', img)
+        #     cv2.waitKey(0)
+
         images = images.to(device)
-        if tensor4d:
-            # print('Before: ', images.tensors.shape)
-            images.tensors = images.tensors.unsqueeze(2)
-            # images.tensors = images.tensors.repeat((1,1,random.randint(2, 6),1,1)) # TODO Replace by real images (random #frames test)
-            images.tensors = images.tensors.repeat((1,1,2,1,1))  # TODO Replace by real images
-            # print('After: ', images.tensors.shape)
+
         targets = [target.to(device) for target in targets]
 
         loss_dict = model(images, targets)
