@@ -11,7 +11,11 @@ import torch.distributed as dist
 from maskrcnn_benchmark.utils.comm import get_world_size
 from maskrcnn_benchmark.utils.metric_logger import MetricLogger
 
+from tensorboardX import SummaryWriter
+
 from apex import amp
+
+random.seed(0)
 
 def reduce_loss_dict(loss_dict):
     """
@@ -51,6 +55,10 @@ def do_train(
     logger = logging.getLogger("maskrcnn_benchmark.trainer")
     logger.info("Start training")
     meters = MetricLogger(delimiter="  ")
+
+    # Create Tensorboard logger
+    board_writer = SummaryWriter(arguments['log_dir'])
+
     max_iter = len(data_loader)
     start_iter = arguments["iteration"]
     model.train()
@@ -70,6 +78,41 @@ def do_train(
         #     img = img.astype(np.uint8)
         #     img = np.moveaxis(img, 0, -1)
         #     cv2.imshow('frame ', img)
+        #     cv2.waitKey(0)
+
+
+        # Visualize ground truth annotations
+        """
+        Adds the predicted boxes on top of the image
+
+        Arguments:
+            image (np.ndarray): an image as returned by OpenCV
+            predictions (BoxList): the result of the computation by the model.
+                It should contain the field `labels`.
+        """
+        #
+        # for f in range(images.tensors.shape[2]):
+        #     img = images.tensors[0,:,f,:,:].numpy()
+        #     img = img * 255
+        #     img = img.astype(np.uint8)
+        #     img = np.moveaxis(img, 0, -1)
+        #     labels = targets[0].get_field("labels")
+        #     boxes = targets[0].bbox
+        #
+        #     palette = torch.tensor([2 ** 25 - 1, 2 ** 15 - 1, 2 ** 21 - 1])
+        #     colors = labels[:, None] * palette
+        #     colors = (colors % 255).numpy().astype("uint8")
+        #     colors = colors.tolist()
+        #
+        #     for box, color in zip(boxes, colors):
+        #         box = box.to(torch.int64)
+        #         top_left, bottom_right = box[:2].tolist(), box[2:].tolist()
+        #         img = cv2.rectangle(
+        #             img, tuple(top_left), tuple(bottom_right), tuple(color), 5
+
+        #         )
+        #
+        #     cv2.imshow('labels', img)
         #     cv2.waitKey(0)
 
         images = images.to(device)
@@ -117,6 +160,14 @@ def do_train(
                     memory=torch.cuda.max_memory_allocated() / 1024.0 / 1024.0,
                 )
             )
+
+            # Write iter metrics to TensorboardX logger
+            info = {}
+            for name, meter in meters.meters.items():
+                info[name] = meter.global_avg
+            board_writer.add_scalar('lr', optimizer.param_groups[0]["lr"], iteration)
+            board_writer.add_scalars('loss', info, iteration)
+
         if iteration % checkpoint_period == 0:
             checkpointer.save("model_{:07d}".format(iteration), **arguments)
         if iteration == max_iter:
