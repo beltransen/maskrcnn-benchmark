@@ -119,22 +119,42 @@ class DatasetCatalog(object):
         "kitti_val_crowd": {
             "img_dir": "kitti/object/training/image_2",
             "ann_file": "kitti/object/coco_anns/annotations_crowd_kitti_validation.json"
+        },
+        "kitti_nl_train_crowd": {
+            "img_dir": "kitti/object/training/image_2",
+            "ann_file": "kitti/object/coco_anns/annotations_crowd_kitti_training.json"
+        },
+        "kitti_nl_val_crowd": {
+            "img_dir": "kitti/object/training/image_2",
+            "ann_file": "kitti/object/coco_anns/annotations_crowd_kitti_validation.json"
         }
     }
 
     @staticmethod
     def get(name):
-        if "coco" in name:
-            data_dir = DatasetCatalog.DATA_DIR
-            attrs = DatasetCatalog.DATASETS[name]
-            args = dict(
-                root=os.path.join(data_dir, attrs["img_dir"]),
-                ann_file=os.path.join(data_dir, attrs["ann_file"]),
-            )
-            return dict(
-                factory="COCODataset",
-                args=args,
-            )
+        if "coco" in name or 'kitti' in name:
+            if "kitti_nl" in name:
+                data_dir = DatasetCatalog.DATA_DIR
+                attrs = DatasetCatalog.DATASETS[name]
+                args = dict(
+                    root=os.path.join(data_dir, attrs["img_dir"]),
+                    ann_file=os.path.join(data_dir, attrs["ann_file"]),
+                )
+                return dict(
+                    factory="KITTIDataset",
+                    args=args,
+                )
+            else:
+                data_dir = DatasetCatalog.DATA_DIR
+                attrs = DatasetCatalog.DATASETS[name]
+                args = dict(
+                    root=os.path.join(data_dir, attrs["img_dir"]),
+                    ann_file=os.path.join(data_dir, attrs["ann_file"]),
+                )
+                return dict(
+                    factory="COCODataset",
+                    args=args,
+                )
         elif "voc" in name:
             data_dir = DatasetCatalog.DATA_DIR
             attrs = DatasetCatalog.DATASETS[name]
@@ -144,17 +164,6 @@ class DatasetCatalog(object):
             )
             return dict(
                 factory="PascalVOCDataset",
-                args=args,
-            )
-        elif "kitti" in name:
-            data_dir = DatasetCatalog.DATA_DIR
-            attrs = DatasetCatalog.DATASETS[name]
-            args = dict(
-                root=os.path.join(data_dir, attrs["img_dir"]),
-                ann_file=os.path.join(data_dir, attrs["ann_file"]),
-            )
-            return dict(
-                factory="KITTIDataset",
                 args=args,
             )
         raise RuntimeError("Dataset not available: {}".format(name))
