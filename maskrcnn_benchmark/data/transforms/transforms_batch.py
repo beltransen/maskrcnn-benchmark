@@ -5,6 +5,7 @@ import torch
 import torchvision
 from torchvision.transforms import functional as F
 
+# random.seed(0) # Reproducibility
 
 class Compose(object):
     def __init__(self, transforms):
@@ -111,11 +112,10 @@ class Normalize(object):
     def __call__(self, images, target=None):
         if isinstance(images, list):
             images = ToTensor(images, target)
-
         for i in range(images.shape[1]):
             if self.to_bgr255:
-                images[..., i, ...] = images[..., i, ...][[2, 1, 0]] * 255
-            images[..., i, ...] = F.normalize(images[..., i, ...], mean=self.mean, std=self.std)
+                images[:, i, :, :] = images[:, i, :, :][[2, 1, 0]] * 255
+            images[:, i, :, :] = F.normalize(images[:, i, :, :], mean=self.mean, std=self.std)
         if target is None:
             return images
         return images, target
