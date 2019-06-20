@@ -29,7 +29,7 @@ def build_transforms(cfg, is_train=True):
     normalize_transform = transformer.Normalize(
         mean=cfg.INPUT.PIXEL_MEAN, std=cfg.INPUT.PIXEL_STD, to_bgr255=to_bgr255
     )
-    color_jitter = T.ColorJitter(
+    color_jitter = transformer.ColorJitter(
         brightness=brightness,
         contrast=contrast,
         saturation=saturation,

@@ -65,7 +65,7 @@ _C.INPUT.HUE = 0.0
 # ---------------------------------------------------------------------------- #
 _C.NON_LOCAL = CN()
 _C.NON_LOCAL.ENABLED = False  # Enable 4D computation
-_C.NON_LOCAL.FRAME_COUNT = 1  # Amount of consecutive frames stacked in time dimension
+_C.NON_LOCAL.FIRST_CTX_FRAME = 1 # 0 includes current frame, 1 to start from previous frame = 1
 _C.NON_LOCAL.AT_BLOCKS = ()  # Index of Resnet blockS where non-local modules are inserted
 _C.NON_LOCAL.PATCH_SIZE = 7
 _C.NON_LOCAL.USE_BN = False

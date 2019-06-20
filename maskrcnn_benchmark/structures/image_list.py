@@ -47,8 +47,6 @@ def to_image_list(tensors, size_divisible=0):
         image_sizes = [tensor.shape[-2:] for tensor in tensors]
         return ImageList(tensors, image_sizes)
     elif isinstance(tensors, (tuple, list)):
-        print('image list input ', tensors[0].shape)
-        print('image list size ', len(tensors))
         max_size = tuple(max(s) for s in zip(*[img.shape for img in tensors]))
 
 
@@ -63,9 +61,7 @@ def to_image_list(tensors, size_divisible=0):
             max_size[2] = int(math.ceil(max_size[2] / stride) * stride)
             max_size = tuple(max_size)
 
-        print("Max size", max_size)
         batch_shape = (len(tensors),) + max_size
-        print("batch_shape: ", batch_shape )
         batched_imgs = tensors[0].new(*batch_shape).zero_()
         for img, pad_img in zip(tensors, batched_imgs):
             pad_img[: img.shape[0], : img.shape[1], : img.shape[2]].copy_(img)

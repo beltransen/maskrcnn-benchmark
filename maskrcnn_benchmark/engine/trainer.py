@@ -91,8 +91,16 @@ def do_train(
                 It should contain the field `labels`.
         """
         #
-        # for f in range(images.tensors.shape[2]):
-        #     img = images.tensors[0,:,f,:,:].numpy()
+        # if len(images.tensors.shape) == 5:
+        #     num_images = images.tensors.shape[2]
+        # else:
+        #     num_images = images.tensors.shape[0]
+        #
+        # for f in range(num_images):
+        #     if len(images.tensors.shape) == 5:
+        #         img = images.tensors[0,:,f,:,:].numpy()
+        #     else:
+        #         img = images.tensors[f,:,:,:].numpy()
         #     img = img * 255
         #     img = img.astype(np.uint8)
         #     img = np.moveaxis(img, 0, -1)
@@ -109,7 +117,7 @@ def do_train(
         #         top_left, bottom_right = box[:2].tolist(), box[2:].tolist()
         #         img = cv2.rectangle(
         #             img, tuple(top_left), tuple(bottom_right), tuple(color), 5
-
+        #
         #         )
         #
         #     cv2.imshow('labels', img)
