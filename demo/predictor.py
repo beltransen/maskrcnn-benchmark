@@ -2,10 +2,11 @@
 import cv2
 import torch
 from torchvision import transforms as T
+from maskrcnn_benchmark.data.transforms import transforms_batch as TB
 
 from maskrcnn_benchmark.modeling.detector import build_detection_model
 from maskrcnn_benchmark.utils.checkpoint import DetectronCheckpointer
-from maskrcnn_benchmark.structures.image_list import to_image_list
+from maskrcnn_benchmark.structures.image_list import to_image_list, to_4dimage_list
 from maskrcnn_benchmark.modeling.roi_heads.mask_head.inference import Masker
 from maskrcnn_benchmark import layers as L
 from maskrcnn_benchmark.utils import cv2_util
@@ -40,93 +41,103 @@ class Resize(object):
 
     def __call__(self, image):
         size = self.get_size(image.size)
-        image = F.resize(image, size)
+        image = T.functional.resize(image, size)
         return image
+
+
 class COCODemo(object):
     # COCO categories for pretty print
-    CATEGORIES = [
-        "__background",
-        "person",
-        "bicycle",
-        "car",
-        "motorcycle",
-        "airplane",
-        "bus",
-        "train",
-        "truck",
-        "boat",
-        "traffic light",
-        "fire hydrant",
-        "stop sign",
-        "parking meter",
-        "bench",
-        "bird",
-        "cat",
-        "dog",
-        "horse",
-        "sheep",
-        "cow",
-        "elephant",
-        "bear",
-        "zebra",
-        "giraffe",
-        "backpack",
-        "umbrella",
-        "handbag",
-        "tie",
-        "suitcase",
-        "frisbee",
-        "skis",
-        "snowboard",
-        "sports ball",
-        "kite",
-        "baseball bat",
-        "baseball glove",
-        "skateboard",
-        "surfboard",
-        "tennis racket",
-        "bottle",
-        "wine glass",
-        "cup",
-        "fork",
-        "knife",
-        "spoon",
-        "bowl",
-        "banana",
-        "apple",
-        "sandwich",
-        "orange",
-        "broccoli",
-        "carrot",
-        "hot dog",
-        "pizza",
-        "donut",
-        "cake",
-        "chair",
-        "couch",
-        "potted plant",
-        "bed",
-        "dining table",
-        "toilet",
-        "tv",
-        "laptop",
-        "mouse",
-        "remote",
-        "keyboard",
-        "cell phone",
-        "microwave",
-        "oven",
-        "toaster",
-        "sink",
-        "refrigerator",
-        "book",
-        "clock",
-        "vase",
-        "scissors",
-        "teddy bear",
-        "hair drier",
-        "toothbrush",
-    ]
+    CATEGORIES = {
+        'coco' : [
+            "__background",
+            "person",
+            "bicycle",
+            "car",
+            "motorcycle",
+            "airplane",
+            "bus",
+            "train",
+            "truck",
+            "boat",
+            "traffic light",
+            "fire hydrant",
+            "stop sign",
+            "parking meter",
+            "bench",
+            "bird",
+            "cat",
+            "dog",
+            "horse",
+            "sheep",
+            "cow",
+            "elephant",
+            "bear",
+            "zebra",
+            "giraffe",
+            "backpack",
+            "umbrella",
+            "handbag",
+            "tie",
+            "suitcase",
+            "frisbee",
+            "skis",
+            "snowboard",
+            "sports ball",
+            "kite",
+            "baseball bat",
+            "baseball glove",
+            "skateboard",
+            "surfboard",
+            "tennis racket",
+            "bottle",
+            "wine glass",
+            "cup",
+            "fork",
+            "knife",
+            "spoon",
+            "bowl",
+            "banana",
+            "apple",
+            "sandwich",
+            "orange",
+            "broccoli",
+            "carrot",
+            "hot dog",
+            "pizza",
+            "donut",
+            "cake",
+            "chair",
+            "couch",
+            "potted plant",
+            "bed",
+            "dining table",
+            "toilet",
+            "tv",
+            "laptop",
+            "mouse",
+            "remote",
+            "keyboard",
+            "cell phone",
+            "microwave",
+            "oven",
+            "toaster",
+            "sink",
+            "refrigerator",
+            "book",
+            "clock",
+            "vase",
+            "scissors",
+            "teddy bear",
+            "hair drier",
+            "toothbrush",
+        ],
+        'kitti': [
+            "__background",
+            "Car",
+            "Pedestrian",
+            "Cyclist",
+        ],
+    }
 
     def __init__(
         self,
@@ -142,6 +153,7 @@ class COCODemo(object):
         self.device = torch.device(cfg.MODEL.DEVICE)
         self.model.to(self.device)
         self.min_image_size = min_image_size
+        self.dataset = 'kitti' if 'kitti' in cfg.DATASETS.TRAIN[0] else 'coco'
 
         save_dir = cfg.OUTPUT_DIR
         checkpointer = DetectronCheckpointer(cfg, self.model, save_dir=save_dir)
@@ -170,6 +182,7 @@ class COCODemo(object):
         # to BGR, they are already! So all we need to do is to normalize
         # by 255 if we want to convert to BGR255 format, or flip the channels
         # if we want it to be in RGB in [0-1] range.
+
         if cfg.INPUT.TO_BGR255:
             to_bgr_transform = T.Lambda(lambda x: x * 255)
         else:
@@ -204,6 +217,8 @@ class COCODemo(object):
         predictions = self.compute_prediction(image)
         top_predictions = self.select_top_predictions(predictions)
 
+        if isinstance(image, list):
+            image = image[0]
         result = image.copy()
         if self.show_mask_heatmaps:
             return self.create_mask_montage(result, top_predictions)
@@ -216,22 +231,63 @@ class COCODemo(object):
 
         return result
 
-    def compute_prediction(self, original_image):
+    def run_on_opencv_sequence(self, images):
         """
         Arguments:
-            original_image (np.ndarray): an image as returned by OpenCV
+            images list(np.ndarray): a list of images read by OpenCV
+
+        Returns:
+            prediction (BoxList): the detected objects in current frame. Additional information
+                of the detection properties can be found in the fields of
+                the BoxList via `prediction.fields()`
+        """
+        predictions = self.compute_prediction(images)
+        top_predictions = self.select_top_predictions(predictions)
+
+        result = images[0].copy()  # TODO Review if other frames should be copied for viz
+        if self.show_mask_heatmaps:
+            return self.create_mask_montage(result, top_predictions)
+        result = self.overlay_boxes(result, top_predictions)
+        if self.cfg.MODEL.MASK_ON:
+            result = self.overlay_mask(result, top_predictions)
+        if self.cfg.MODEL.KEYPOINT_ON:
+            result = self.overlay_keypoints(result, top_predictions)
+        result = self.overlay_class_names(result, top_predictions)
+
+        return result
+
+    def compute_prediction(self, original_images):
+        """
+        Arguments:
+            original_images (np.ndarray) or list(np.ndarray): an image or list of images loaded by OpenCV
 
         Returns:
             prediction (BoxList): the detected objects. Additional information
                 of the detection properties can be found in the fields of
                 the BoxList via `prediction.fields()`
         """
-        # apply pre-processing to image
-        image = self.transforms(original_image)
+        # If single image, wrap it into a list for convenience
+        if type(original_images) is np.ndarray:
+            original_images = [original_images]
+
+        # Apply pre-processing to image(s)
+        images = []
+        for i in range(len(original_images)):
+            images.append(self.transforms(original_images[i]))
+
         # convert to an ImageList, padded so that it is divisible by
         # cfg.DATALOADER.SIZE_DIVISIBILITY
-        image_list = to_image_list(image, self.cfg.DATALOADER.SIZE_DIVISIBILITY)
+
+        if len(images) > 1:
+            assert self.cfg.NON_LOCAL.ENABLED, \
+                'ERROR: trying to process a sequence of images with 2D network (NON_LOCAL.ENABLED = False)'
+            images = torch.stack(images, dim=1)
+            image_list = to_4dimage_list(images, self.cfg.DATALOADER.SIZE_DIVISIBILITY)
+        else:
+            image_list = to_image_list(images[0], self.cfg.DATALOADER.SIZE_DIVISIBILITY)
+
         image_list = image_list.to(self.device)
+
         # compute predictions
         with torch.no_grad():
             predictions = self.model(image_list)
@@ -241,7 +297,7 @@ class COCODemo(object):
         prediction = predictions[0]
 
         # reshape prediction (a BoxList) into the original image size
-        height, width = original_image.shape[:-1]
+        height, width = original_images[0].shape[:-1]
         prediction = prediction.resize((width, height))
 
         if prediction.has_field("mask"):
@@ -388,7 +444,7 @@ class COCODemo(object):
         """
         scores = predictions.get_field("scores").tolist()
         labels = predictions.get_field("labels").tolist()
-        labels = [self.CATEGORIES[i] for i in labels]
+        labels = [self.CATEGORIES[self.dataset][i] for i in labels]
         boxes = predictions.bbox
 
         template = "{}: {:.2f}"

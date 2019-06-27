@@ -1,5 +1,8 @@
+#!/usr/bin/env python
+
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 import argparse
+import os
 import cv2
 
 from maskrcnn_benchmark.config import cfg
@@ -9,12 +12,18 @@ import time
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PyTorch Object Detection Webcam Demo")
+    parser = argparse.ArgumentParser(description="PyTorch Object Detection Demo [Single or Multi-frame (NLNets)]")
     parser.add_argument(
         "--config-file",
-        default="../configs/caffe2/e2e_mask_rcnn_R_50_FPN_1x_caffe2.yaml",
+        default="../configs/e2e_faster_rcnn_R_50_FPN_1x_KITTI_nonlocal_pret.yaml",
         metavar="FILE",
         help="path to config file",
+    )
+    parser.add_argument(
+        "--image",
+        default="../demo/demo_e2e_mask_rcnn_R_50_FPN_1x.png",
+        metavar="FILE",
+        help="path to image file",
     )
     parser.add_argument(
         "--confidence-threshold",
@@ -25,7 +34,7 @@ def main():
     parser.add_argument(
         "--min-image-size",
         type=int,
-        default=224,
+        default=375,
         help="Smallest size of the image to feed to the model. "
             "Model was trained with 800, which gives best results",
     )
@@ -64,16 +73,31 @@ def main():
         min_image_size=args.min_image_size,
     )
 
-    cam = cv2.VideoCapture(0)
-    while True:
-        start_time = time.time()
-        ret_val, img = cam.read()
-        composite = coco_demo.run_on_opencv_image(img)
-        print("Time: {:.2f} s / img".format(time.time() - start_time))
-        cv2.imshow("COCO detections", composite)
-        if cv2.waitKey(1) == 27:
-            break  # esc to quit
-    cv2.destroyAllWindows()
+    img = cv2.imread(args.image)
+    imgs = [img]
+
+    start_time = time.time()
+    if '_nl' in cfg.DATASETS.TRAIN[0]:
+        print("Hey man, you're using NLNets")
+        prev_dir = args.image
+        prev_dir = prev_dir.replace("image", "prev")
+        # Load previous frames into variables
+        for prev_id in range(1, 4):
+            complete_name_prev_img = prev_dir[:-4] + '_{0:02d}'.format(prev_id) + '.png'
+            if os.path.exists(complete_name_prev_img):
+                img_prev = cv2.imread(complete_name_prev_img)
+                imgs.append(img_prev)
+            else:
+                break
+        composite = coco_demo.run_on_opencv_sequence(imgs)
+    else:
+        composite = coco_demo.run_on_opencv_image(imgs)
+
+    print("Time: {:.2f} s / img".format(time.time() - start_time))
+    cv2.imshow("Detections", composite)
+    if cv2.waitKey(0) == 27:
+        cv2.destroyAllWindows()
+    return 0
 
 
 if __name__ == "__main__":
