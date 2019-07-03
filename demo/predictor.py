@@ -241,7 +241,11 @@ class COCODemo(object):
                 of the detection properties can be found in the fields of
                 the BoxList via `prediction.fields()`
         """
+
         predictions = self.compute_prediction(images)
+        if self.cfg.NON_LOCAL.RETURN_ATTENTION:
+            att_maps= predictions[1]
+            predictions = predictions[0]
         top_predictions = self.select_top_predictions(predictions)
 
         result = images[0].copy()  # TODO Review if other frames should be copied for viz
@@ -254,7 +258,10 @@ class COCODemo(object):
             result = self.overlay_keypoints(result, top_predictions)
         result = self.overlay_class_names(result, top_predictions)
 
-        return result
+        if self.cfg.NON_LOCAL.RETURN_ATTENTION:
+            return result, att_maps
+        else:
+            return result
 
     def compute_prediction(self, original_images):
         """
@@ -290,7 +297,10 @@ class COCODemo(object):
 
         # compute predictions
         with torch.no_grad():
-            predictions = self.model(image_list)
+            if self.cfg.NON_LOCAL.ENABLED and self.cfg.NON_LOCAL.RETURN_ATTENTION:
+                predictions, att_maps = self.model(image_list)
+            else:
+                predictions = self.model(image_list)
         predictions = [o.to(self.cpu_device) for o in predictions]
 
         # always single image is passed at a time
@@ -307,7 +317,11 @@ class COCODemo(object):
             # always single image is passed at a time
             masks = self.masker([masks], [prediction])[0]
             prediction.add_field("mask", masks)
-        return prediction
+
+        if self.cfg.NON_LOCAL.ENABLED and self.cfg.NON_LOCAL.RETURN_ATTENTION:
+            return prediction, att_maps
+        else:
+            return prediction
 
     def select_top_predictions(self, predictions):
         """
