@@ -21,7 +21,7 @@ def build_transforms(cfg, is_train=True):
         saturation = 0.0
         hue = 0.0
 
-    if cfg.NON_LOCAL.ENABLED:  # Input is a 4D Tensor (Image sequences)
+    if cfg.NON_LOCAL_CTX.ENABLED:  # Input is a 4D Tensor (Image sequences)
         transformer = TB  # Apply the same transformations for a group of images stored in a list
     else:
         transformer = T  # Common single image transformations

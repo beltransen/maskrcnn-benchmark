@@ -77,7 +77,7 @@ class GeneralizedRCNN3D(nn.Module):
 
     def __init__(self, cfg):
         super(GeneralizedRCNN3D, self).__init__()
-
+        self.cfg = cfg.clone()
         self.backbone = build_backbone(cfg)
         self.rpn = build_rpn(cfg, self.backbone.out_channels)
         self.roi_heads = build_roi_heads(cfg, self.backbone.out_channels)
@@ -99,6 +99,8 @@ class GeneralizedRCNN3D(nn.Module):
             raise ValueError("In training mode, targets should be passed")
         images = to_image_list(images)
         features = self.backbone(images.tensors)
+        if isinstance(features, tuple) and len(features) == 2:
+            features, att_maps = features
         proposals, proposal_losses = self.rpn(images, features, targets)
         if self.roi_heads:
             x, result, detector_losses = self.roi_heads(features, proposals, targets)
@@ -114,4 +116,7 @@ class GeneralizedRCNN3D(nn.Module):
             losses.update(proposal_losses)
             return losses
 
-        return result
+        if self.cfg.NON_LOCAL_CTX.RETURN_ATTENTION:
+            return result, att_maps
+        else:
+            return result

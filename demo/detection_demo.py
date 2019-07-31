@@ -42,29 +42,26 @@ def show_non_local_connections(event, x, y, flags, param):
         image_size = image.shape[:2]
         image_min = min(image_size)
         scale_factor = input_min/image_min
-        print('Scale factor', scale_factor)
+        # print('Scale factor', scale_factor)
         new_size = scale_factor*np.asarray(image_size)
         new_size = tuple(new_size.astype(np.int))
 
         # Get point at target layer scale
         targetPt = np.asarray(refPt) * scale_factor
         targetPt = refPt
-        print('{} -> {}'.format(refPt, targetPt))
+        # print('{} -> {}'.format(refPt, targetPt))
 
         # Fetch attention map for that pixel
-        for key in att_maps:
-            print('{}: {}'.format(key, att_maps[key].shape))
-
         attPt = np.asarray(targetPt) // downsample_factor[active_layer]
         attPt = attPt.astype(np.int)
-        print('[{}] {} -> {}'.format(active_layer, targetPt, attPt))
+        # print('[{}] {} -> {}'.format(active_layer, targetPt, attPt))
         pixel_att = att_maps[active_layer][0, attPt[1], attPt[0], :, :]
-        print('Size ', pixel_att.shape)
+        # print('Size ', pixel_att.shape)
 
         # Compute attention map window at input size scale
         pixel_att_resized = []
         for att_window in pixel_att:
-            att_window = np.reshape(att_window, (my_cfg.NON_LOCAL.PATCH_SIZE, my_cfg.NON_LOCAL.PATCH_SIZE))
+            att_window = np.reshape(att_window, (my_cfg.NON_LOCAL_CTX.PATCH_SIZE, my_cfg.NON_LOCAL_CTX.PATCH_SIZE))
             pixel_att_resized.append(cv2.resize(att_window, tuple(np.asarray(att_window.shape)*downsample_factor[active_layer]), interpolation=cv2.INTER_NEAREST))
 
         img_height = image_composition.shape[0] // (len(pixel_att_resized) + 1)
@@ -99,12 +96,11 @@ def show_non_local_connections(event, x, y, flags, param):
         # For every preceding frame, represent tiles proportional to their attention score
         hsv_composition = cv2.cvtColor(image_composition, cv2.COLOR_BGR2HSV)
         for i in range(len(pixel_att_resized)):
-            frame = pixel_att_resized[i] * 255
-            print(np.max(frame), np.min(frame))
+            # frame = pixel_att_resized[i] * 255
             # cv2.imshow('att_resize', frame.astype(np.uint8))
 
-            print('Copying Patch [Rows: ({}, {}) Cols: ({}, {})] into Image [Rows: ({}, {}) Cols: ({}, {})]'
-                  .format(min_row_idx, max_row_idx, min_col_idx, max_col_idx, min_row, max_row, min_col, max_col))
+            # print('Copying Patch [Rows: ({}, {}) Cols: ({}, {})] into Image [Rows: ({}, {}) Cols: ({}, {})]'
+            #       .format(min_row_idx, max_row_idx, min_col_idx, max_col_idx, min_row, max_row, min_col, max_col))
             row_offset = (i+1) * img_height
             hsv_composition[row_offset+min_row:row_offset+max_row, min_col:max_col, 2] = \
                 pixel_att_resized[i][min_row_idx:max_row_idx, min_col_idx:max_col_idx] * hsv_composition[row_offset+min_row:row_offset+max_row, min_col:max_col, 2]
@@ -136,7 +132,7 @@ def main():
     parser = argparse.ArgumentParser(description="PyTorch Object Detection Demo [Single or Multi-frame (NLNets)]")
     parser.add_argument(
         "--config-file",
-        default="../configs/e2e_faster_rcnn_R_50_FPN_1x_KITTI_nonlocal_pret.yaml",
+        default="../configs/kitti2d/e2e_faster_rcnn_R_50_FPN_1x_Alabama.yaml",
         metavar="FILE",
         help="path to config file",
     )
@@ -186,10 +182,12 @@ def main():
     cfg.freeze()
 
     my_cfg = cfg.clone()
+    opts = ["NON_LOCAL_CTX.RETURN_ATTENTION", True]
+    my_cfg.merge_from_list(opts)  # If NL, make sure attention is shown
 
     # prepare object that handles inference plus adds predictions on top of image
     coco_demo = COCODemo(
-        cfg,
+        my_cfg,
         confidence_threshold=args.confidence_threshold,
         show_mask_heatmaps=args.show_mask_heatmaps,
         masks_per_dim=args.masks_per_dim,
@@ -200,7 +198,7 @@ def main():
     imgs = [img]
 
     start_time = time.time()
-    if '_nl' in cfg.DATASETS.TRAIN[0]:
+    if '_nl' in my_cfg.DATASETS.TRAIN[0]:
         print("Hey man, you're using NLNets")
         prev_dir = args.image
         prev_dir = prev_dir.replace("image", "prev")
@@ -213,7 +211,7 @@ def main():
             else:
                 break
         image = coco_demo.run_on_opencv_sequence(imgs)
-        if cfg.NON_LOCAL.RETURN_ATTENTION:
+        if my_cfg.NON_LOCAL_CTX.RETURN_ATTENTION:
             att_maps = image[1]
             for key in att_maps:
                 # print('{}: {}'.format(key, att_maps[key].shape))
@@ -230,7 +228,7 @@ def main():
 
     cv2.namedWindow("Detections", cv2.WINDOW_NORMAL)
 
-    if cfg.NON_LOCAL.ENABLED:
+    if my_cfg.NON_LOCAL_CTX.ENABLED:
         cv2.setMouseCallback("Detections", show_non_local_connections)
 
     input_min = my_cfg.INPUT.MIN_SIZE_TEST
@@ -244,7 +242,8 @@ def main():
 
     image_composition = np.zeros((new_size[0]*len(imgs), new_size[1], image.shape[2]), dtype=np.uint8)
     for i in range(len(imgs)):
-        image_composition[i*new_size[0]:(i+1)*new_size[0]:, :, :] = cv2.resize(imgs[i], (new_size[1], new_size[0]), interpolation=cv2.INTER_CUBIC)
+        image_composition[i*new_size[0]:(i+1)*new_size[0]:, :, :] = cv2.resize(imgs[i], (new_size[1], new_size[0]),
+                                                                               interpolation=cv2.INTER_CUBIC)
 
     original_composition = np.copy(image_composition)  # Backup
 
@@ -256,9 +255,9 @@ def main():
 
         if key == 27:
             break
-        elif 47 < key < 58: # If it's a number, change attention layer
+        elif 47 < key < 58:  # If it's a number, change attention layer
 
-            if cfg.NON_LOCAL.ENABLED:
+            if my_cfg.NON_LOCAL_CTX.ENABLED:
                 key = key - 48  # 48 is number 0
                 aux = 'layer{}'.format(key)
                 if aux in att_maps.keys():  # Only update if layer exists
@@ -266,7 +265,6 @@ def main():
                     print(colored('Switched to {}'.format(active_layer), 'green'))
                 else:
                     print(colored('[ERROR] Requested attention layer [{}] does not exist'.format(aux), 'red'))
-
 
     cv2.destroyAllWindows()
     return 0

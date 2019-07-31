@@ -65,6 +65,11 @@ def main():
     logger.info("\n" + collect_env_info())
 
     model = build_detection_model(cfg)
+    print(model)
+    current_keys = sorted(list(model.state_dict().keys()))
+    # [print(key) for key in current_keys]
+    # exit('------------------------\nMODEL TEST MODE. EXITING\n------------------------')
+
     model.to(cfg.MODEL.DEVICE)
 
     # Initialize mixed-precision if necessary

@@ -84,45 +84,8 @@ class RPNHead(nn.Module):
             num_anchors (int): number of anchors to be predicted
         """
         super(RPNHead, self).__init__()
-        self.conv = nn.Conv2d(
-            in_channels, in_channels, kernel_size=3, stride=1, padding=1
-        )
-        self.cls_logits = nn.Conv2d(in_channels, num_anchors, kernel_size=1, stride=1)
-        self.bbox_pred = nn.Conv2d(
-            in_channels, num_anchors * 4, kernel_size=1, stride=1
-        )
-
-        for l in [self.conv, self.cls_logits, self.bbox_pred]:
-            torch.nn.init.normal_(l.weight, std=0.01)
-            torch.nn.init.constant_(l.bias, 0)
-
-    def forward(self, x):
-        logits = []
-        bbox_reg = []
-        for feature in x:
-            t = F.relu(self.conv(feature))
-            logits.append(self.cls_logits(t))
-            bbox_reg.append(self.bbox_pred(t))
-        return logits, bbox_reg
-
-
-@registry.RPN_HEADS.register("SingleConv3dRPNHead")
-class RPN3dHead(nn.Module):
-    """
-    Adds a simple RPN Head with classification and regression heads
-    """
-
-    def __init__(self, cfg, in_channels, num_anchors):
-        """
-        Arguments:
-            cfg              : config
-            in_channels (int): number of channels of the input feature
-            num_anchors (int): number of anchors to be predicted
-        """
-        super(RPN3dHead, self).__init__()
-        print("in_channels:", in_channels)
         self.conv = nn.Conv3d(
-            in_channels, in_channels, kernel_size=(1, 3, 3), stride=1, padding=1
+            in_channels, in_channels, kernel_size=(1,3, 3), stride=1, padding=1
         )
         self.cls_logits = nn.Conv3d(in_channels, num_anchors, kernel_size=1, stride=1)
         self.bbox_pred = nn.Conv3d(
@@ -141,6 +104,7 @@ class RPN3dHead(nn.Module):
             logits.append(self.cls_logits(t))
             bbox_reg.append(self.bbox_pred(t))
         return logits, bbox_reg
+
 
 class RPNModule(torch.nn.Module):
     """

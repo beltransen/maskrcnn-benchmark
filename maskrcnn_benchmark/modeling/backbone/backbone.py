@@ -122,9 +122,35 @@ def build_resnet_nl_fpn_backbone(cfg):
         ),
         top_blocks=fpn_module.LastLevelMaxPool(),
     )
-    model = nn.Sequential(OrderedDict([("body", body), ("fpn", fpn)]))
-    model.out_channels = out_channels
+
+    # if cfg.NON_LOCAL_CTX.RETURN_ATTENTION:
+    class MultipleOuputModel(nn.Module):
+        def __init__(self, body, fpn, out_channels):
+            super(MultipleOuputModel, self).__init__()
+
+            self.body = body
+            self.fpn = fpn
+            self.out_channels = out_channels
+
+        def forward(self, ins):
+            out = self.body(ins)
+            if cfg.NON_LOCAL_CTX.RETURN_ATTENTION:
+                att_maps = out[1]
+                out = out[0]
+
+            out = self.fpn(out)
+
+            if cfg.NON_LOCAL_CTX.RETURN_ATTENTION:
+                return out, att_maps
+            else:
+                return out
+
+    model = MultipleOuputModel(body, fpn, out_channels)
+    # else:
+    #     model = nn.Sequential(OrderedDict([("body", body), ("fpn", fpn)]))
+    #     model.out_channels = out_channels
     return model
+
 
 def build_backbone(cfg):
     assert cfg.MODEL.BACKBONE.CONV_BODY in registry.BACKBONES, \

@@ -1,7 +1,8 @@
 MODEL:
   META_ARCHITECTURE: "GeneralizedRCNN"
   WEIGHT: "catalog://ImageNetPretrained/MSRA/R-50"
-#  WEIGHT: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-FPN_crowd_EARLY/model_final.pth'
+#  WEIGHT: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-FPN-Florida/model_final.pth'
+#  WEIGHT: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-FPN-Florida/model_0100000.pth'
   BACKBONE:
     CONV_BODY: "R-50-FPN"
     FREEZE_CONV_BODY_AT: 2 # If trained from scratch, there should be no frozen layers
@@ -33,16 +34,16 @@ DATALOADER:
   NUM_WORKERS: 0
 SOLVER:
   BASE_LR: 0.00125  # CHANGED from 0.00125
-  WEIGHT_DECAY: 0.0001
+#  WEIGHT_DECAY: 0.0001
   GAMMA: 0.1
   STEPS: ()
-  MAX_ITER: 10000
+  MAX_ITER: 110000
   IMS_PER_BATCH: 1
   CHECKPOINT_PERIOD: 10000
 TEST:
   IMS_PER_BATCH: 1
   BBOX_AUG:
-    ENABLED: False # CHANGED from False
+    ENABLED: True # CHANGED from False
     H_FLIP: True
     SCALES: (375, 500)
     MAX_SIZE: 2000
@@ -50,7 +51,7 @@ TEST:
 
 # Size of the smallest side of the image during training
 INPUT:
-  MIN_SIZE_TRAIN: (375,)  # (500, 800,)
+  MIN_SIZE_TRAIN: (375, 500)  # v1: (375, 500,)
   MAX_SIZE_TRAIN: 2000
   MIN_SIZE_TEST: 500
   MAX_SIZE_TEST: 2000
@@ -58,4 +59,4 @@ INPUT:
   PIXEL_STD: [1., 1., 1.]
   TO_BGR255: True
 
-OUTPUT_DIR: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-FPN_June20' # CHANGED !!!
+OUTPUT_DIR: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-FPN-Florida' # CHANGED !!!

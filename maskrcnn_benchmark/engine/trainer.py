@@ -172,7 +172,8 @@ def do_train(
             # Write iter metrics to TensorboardX logger
             info = {}
             for name, meter in meters.meters.items():
-                info[name] = meter.global_avg
+                # info[name] = meter.global_avg # Average for all iterations
+                info[name] = meter.avg  # TODO Changed to see more significant values (avg of last 20 iterations) [NEED TO BE TESTED]
             board_writer.add_scalar('lr', optimizer.param_groups[0]["lr"], iteration)
             board_writer.add_scalars('loss', info, iteration)
 

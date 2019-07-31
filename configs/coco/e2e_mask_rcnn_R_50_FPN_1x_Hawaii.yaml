@@ -1,8 +1,9 @@
 MODEL:
-  META_ARCHITECTURE: "GeneralizedRCNN"
+  META_ARCHITECTURE: "GeneralizedRCNN3D"
   WEIGHT: "catalog://ImageNetPretrained/MSRA/R-50"
   BACKBONE:
-    CONV_BODY: "R-50-FPN"
+    CONV_BODY: "R-50-FPN-NL"
+    FREEZE_CONV_BODY_AT: 2 # If trained from scratch, there should be no frozen layers
   RESNETS:
     BACKBONE_OUT_CHANNELS: 256
   RPN:
@@ -13,7 +14,8 @@ MODEL:
     POST_NMS_TOP_N_TEST: 1000
     FPN_POST_NMS_TOP_N_TEST: 1000
   ROI_HEADS:
-    USE_FPN: True
+    USE_FPN: True # CHANGED FROM True
+    SCORE_THRESH: 0.001
   ROI_BOX_HEAD:
     POOLER_RESOLUTION: 7
     POOLER_SCALES: (0.25, 0.125, 0.0625, 0.03125)
@@ -30,8 +32,8 @@ MODEL:
     SHARE_BOX_FEATURE_EXTRACTOR: False
   MASK_ON: True
 DATASETS:
-  TRAIN: ("coco_2014_train", "coco_2014_valminusminival")
-  TEST: ("coco_2014_minival",)
+  TRAIN: ("coco_2017_train",)
+  TEST: ("coco_2017_val",)
 DATALOADER:
   SIZE_DIVISIBILITY: 32
 SOLVER:
@@ -40,5 +42,18 @@ SOLVER:
   STEPS: (120000, 160000)
   MAX_ITER: 180000
   IMS_PER_BATCH: 4
+#  STEPS: (66375, 81125)  # 9th and 11th epoch (118k imgs / 16img/batch = 7375 iter/epoch)
+#  MAX_ITER: 88500
+#  STEPS: (132750, 162250)  # 9th and 11th epoch (118k imgs / 8img/batch = 14750 iter/epoch)
+#  MAX_ITER: 177000
+#TEST:
+#  IMS_PER_BATCH: 2
 
-OUTPUT_DIR: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-MASK-FPN-Original'
+NON_LOCAL_CTX:
+  ENABLED: False  # Enable 4D computation
+  MODULE: "SimplifiedNL"
+  FIRST_CTX_FRAME: 0  # 0 includes current frame, 1 to start from previous frame TODO DELETE (defaults.py = 1)
+  RETURN_ATTENTION: False
+  STAGES: (4,)  # Index of Resnet blocks where non-local modules are inserted
+
+OUTPUT_DIR: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-MASK-FPN-Hawaii'

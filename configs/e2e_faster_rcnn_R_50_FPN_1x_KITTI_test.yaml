@@ -4,39 +4,39 @@ MODEL:
 #  WEIGHT: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-FPN_crowd_EARLY/model_final.pth'
   BACKBONE:
     CONV_BODY: "R-50-FPN"
-    FREEZE_CONV_BODY_AT: 2 # If trained from scratch, there should be no frozen layers
   RESNETS:
     BACKBONE_OUT_CHANNELS: 256
-  RPN:
-    USE_FPN: True
-    ANCHOR_SIZES: (32, 64, 128, 256, 512)
-    ANCHOR_STRIDE: (4, 8, 16, 32, 64)
-    PRE_NMS_TOP_N_TRAIN: 2000
-    PRE_NMS_TOP_N_TEST: 1000
-    POST_NMS_TOP_N_TEST: 1000
-    FPN_POST_NMS_TOP_N_TEST: 1000
-  ROI_HEADS:
-    USE_FPN: True
-    SCORE_THRESH: 0.001
-  ROI_BOX_HEAD:
-    NUM_CLASSES: 4
-    POOLER_RESOLUTION: 7
-    POOLER_SCALES: (0.25, 0.125, 0.0625, 0.03125)
-    POOLER_SAMPLING_RATIO: 2
-    FEATURE_EXTRACTOR: "FPN2MLPFeatureExtractor"
-    PREDICTOR: "FPNPredictor"
+
+  RPN_ONLY: True
+#  RPN:
+#    USE_FPN: True
+#    ANCHOR_SIZES: (32, 64, 128, 256, 512)
+#    ANCHOR_STRIDE: (4, 8, 16, 32, 64)
+#    PRE_NMS_TOP_N_TRAIN: 2000
+#    PRE_NMS_TOP_N_TEST: 1000
+#    POST_NMS_TOP_N_TEST: 1000
+#    FPN_POST_NMS_TOP_N_TEST: 1000
+#  ROI_HEADS:
+#    USE_FPN: False
+#    SCORE_THRESH: 0.001
+#  ROI_BOX_HEAD:
+#    NUM_CLASSES: 4
+#    POOLER_RESOLUTION: 7
+#    POOLER_SCALES: (0.25, 0.125, 0.0625, 0.03125)
+#    POOLER_SAMPLING_RATIO: 2
+#    FEATURE_EXTRACTOR: "FPN2MLPFeatureExtractor"
+#    PREDICTOR: "FPNPredictor"
 DATASETS:
   TRAIN: ("kitti_train_crowd",)
   TEST: ("kitti_val_crowd",)
 DATALOADER:
   SIZE_DIVISIBILITY: 32
-  NUM_WORKERS: 0
 SOLVER:
-  BASE_LR: 0.00125  # CHANGED from 0.00125
+  BASE_LR: 0.00250  # CHANGED from 0.00125
   WEIGHT_DECAY: 0.0001
   GAMMA: 0.1
   STEPS: ()
-  MAX_ITER: 10000
+  MAX_ITER: 110000
   IMS_PER_BATCH: 1
   CHECKPOINT_PERIOD: 10000
 TEST:
@@ -50,7 +50,7 @@ TEST:
 
 # Size of the smallest side of the image during training
 INPUT:
-  MIN_SIZE_TRAIN: (375,)  # (500, 800,)
+  MIN_SIZE_TRAIN: (375, 500)  # (800,)
   MAX_SIZE_TRAIN: 2000
   MIN_SIZE_TEST: 500
   MAX_SIZE_TEST: 2000
@@ -58,4 +58,4 @@ INPUT:
   PIXEL_STD: [1., 1., 1.]
   TO_BGR255: True
 
-OUTPUT_DIR: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-FPN_June20' # CHANGED !!!
+OUTPUT_DIR: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-FPN_crowd_EARLY' # CHANGED !!!

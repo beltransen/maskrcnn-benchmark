@@ -23,7 +23,7 @@ import torch.nn.functional as F
 from torch.nn import Conv3d
 from torch import nn
 
-from maskrcnn_benchmark.layers import FrozenBatchNorm2d
+from maskrcnn_benchmark.layers import FrozenBatchNorm2d, FrozenBatchNorm3d
 from maskrcnn_benchmark.layers import Conv2d
 from maskrcnn_benchmark.layers import DFConv2d
 from maskrcnn_benchmark.modeling.make_layers import group_norm
@@ -109,6 +109,7 @@ class ResNet(nn.Module):
             bottleneck_channels = stage2_bottleneck_channels * stage2_relative_factor
             out_channels = stage2_out_channels * stage2_relative_factor
             stage_with_dcn = cfg.MODEL.RESNETS.STAGE_WITH_DCN[stage_spec.index -1]
+            non_local_enabled = cfg.NON_LOCAL_CTX.ENABLED if stage_spec.index in cfg.NON_LOCAL_CTX.AT_BLOCKS else False
             module = _make_stage(
                 transformation_module,
                 in_channels,
@@ -123,7 +124,7 @@ class ResNet(nn.Module):
                     "with_modulated_dcn": cfg.MODEL.RESNETS.WITH_MODULATED_DCN,
                     "deformable_groups": cfg.MODEL.RESNETS.DEFORMABLE_GROUPS,
                 },
-                non_local=True
+                non_local=non_local_enabled,
             )
             in_channels = out_channels
             self.add_module(name, module)
@@ -149,6 +150,7 @@ class ResNet(nn.Module):
         x = self.stem(x)
         for stage_name in self.stages:
             x = getattr(self, stage_name)(x)
+            print('Forward {}: {}'.format(stage_name, x.shape))
             if self.return_features[stage_name]:
                 outputs.append(x)
         return outputs
@@ -237,7 +239,7 @@ def _make_stage(
         stride = 1
         in_channels = out_channels
 
-        if non_local and idx == (block_count-2): # Add non-local module
+        if non_local and idx == (block_count-2):  # Add non-local module
             blocks.append(NLB3D(out_channels, bottleneck_channels, 7, bn_layer=False))
 
     return nn.Sequential(*blocks)
@@ -280,7 +282,7 @@ class Bottleneck(nn.Module):
         self.conv1 = Conv3d(
             in_channels,
             bottleneck_channels,
-            kernel_size=1,
+            kernel_size=(1,1,1),
             stride=(1, stride_1x1, stride_1x1),
             bias=False,
         )
@@ -329,7 +331,9 @@ class Bottleneck(nn.Module):
     def forward(self, x):
         identity = x
 
+        print("Input: ", x.shape)
         out = self.conv1(x)
+        print("Conv1: ", out.shape)
         out = self.bn1(out)
         out = F.relu_(out)
 
@@ -345,7 +349,6 @@ class Bottleneck(nn.Module):
 
         out += identity
         out = F.relu_(out)
-        print(out.shape)
         return out
 
 
@@ -366,10 +369,13 @@ class BaseStem(nn.Module):
         print("USING BaseStem") # TODO Check which block is used in ResNet
 
     def forward(self, x):
+        print('Stem x', x.shape)
         x = self.conv1(x)
+        print('Stem conv', x.shape)
         x = self.bn1(x)
         x = F.relu_(x)
         x = F.max_pool3d(x, kernel_size=(1,3,3), stride=(1,2,2), padding=(0,1,1))
+        print('Stem out', x.shape)
         return x
 
 
@@ -393,7 +399,7 @@ class BottleneckWithFixedBatchNorm(Bottleneck):
             stride_in_1x1=stride_in_1x1,
             stride=stride,
             dilation=dilation,
-            norm_func=torch.nn.BatchNorm3d,
+            norm_func=FrozenBatchNorm3d,
             dcn_config=dcn_config
         )
 
@@ -403,7 +409,7 @@ class BottleneckWithFixedBatchNorm(Bottleneck):
 class StemWithFixedBatchNorm(BaseStem):
     def __init__(self, cfg):
         super(StemWithFixedBatchNorm, self).__init__(
-            cfg, norm_func=FrozenBatchNorm2d
+            cfg, norm_func=FrozenBatchNorm3d
         )
 
 
@@ -449,6 +455,7 @@ class NLB3D(torch.nn.Module):
         self.psi = torch.nn.Conv3d(in_channels, h_channels, kernel_size=1, stride=1, padding=0, bias=False)
         self.g = torch.nn.Conv3d(in_channels, h_channels, kernel_size=1, stride=1, padding=0, bias=False)
 
+        # TODO Correct before training
         #     torch.nn.init.xavier_uniform(self.theta.weight)
         #     torch.nn.init.xavier_uniform(self.psi.weight)
         #     torch.nn.init.xavier_uniform(self.g.weight)
@@ -557,4 +564,7 @@ _STAGE_SPECS = Registry({
     "R-101-FPN": ResNet101FPNStagesTo5,
     "R-101-FPN-RETINANET": ResNet101FPNStagesTo5,
     "R-152-FPN": ResNet152FPNStagesTo5,
+    "R3D-50": ResNet50StagesTo5,
+    "R3D-50-FPN": ResNet50StagesTo5,
+    "R3D-50-FPN-nl": ResNet50StagesTo5,
 })

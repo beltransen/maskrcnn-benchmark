@@ -243,7 +243,7 @@ class COCODemo(object):
         """
 
         predictions = self.compute_prediction(images)
-        if self.cfg.NON_LOCAL.RETURN_ATTENTION:
+        if self.cfg.NON_LOCAL_CTX.RETURN_ATTENTION:
             att_maps= predictions[1]
             predictions = predictions[0]
         top_predictions = self.select_top_predictions(predictions)
@@ -258,7 +258,7 @@ class COCODemo(object):
             result = self.overlay_keypoints(result, top_predictions)
         result = self.overlay_class_names(result, top_predictions)
 
-        if self.cfg.NON_LOCAL.RETURN_ATTENTION:
+        if self.cfg.NON_LOCAL_CTX.RETURN_ATTENTION:
             return result, att_maps
         else:
             return result
@@ -286,8 +286,8 @@ class COCODemo(object):
         # cfg.DATALOADER.SIZE_DIVISIBILITY
 
         if len(images) > 1:
-            assert self.cfg.NON_LOCAL.ENABLED, \
-                'ERROR: trying to process a sequence of images with 2D network (NON_LOCAL.ENABLED = False)'
+            assert self.cfg.NON_LOCAL_CTX.ENABLED, \
+                'ERROR: trying to process a sequence of images with 2D network (NON_LOCAL_CTX.ENABLED = False)'
             images = torch.stack(images, dim=1)
             image_list = to_4dimage_list(images, self.cfg.DATALOADER.SIZE_DIVISIBILITY)
         else:
@@ -297,7 +297,7 @@ class COCODemo(object):
 
         # compute predictions
         with torch.no_grad():
-            if self.cfg.NON_LOCAL.ENABLED and self.cfg.NON_LOCAL.RETURN_ATTENTION:
+            if self.cfg.NON_LOCAL_CTX.ENABLED and self.cfg.NON_LOCAL_CTX.RETURN_ATTENTION:
                 predictions, att_maps = self.model(image_list)
             else:
                 predictions = self.model(image_list)
@@ -318,7 +318,7 @@ class COCODemo(object):
             masks = self.masker([masks], [prediction])[0]
             prediction.add_field("mask", masks)
 
-        if self.cfg.NON_LOCAL.ENABLED and self.cfg.NON_LOCAL.RETURN_ATTENTION:
+        if self.cfg.NON_LOCAL_CTX.ENABLED and self.cfg.NON_LOCAL_CTX.RETURN_ATTENTION:
             return prediction, att_maps
         else:
             return prediction

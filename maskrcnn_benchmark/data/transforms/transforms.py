@@ -5,6 +5,7 @@ import torch
 import torchvision
 from torchvision.transforms import functional as F
 
+random.seed(0) # Reproducibility
 
 class Compose(object):
     def __init__(self, transforms):

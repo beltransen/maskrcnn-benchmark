@@ -12,6 +12,8 @@ class Compose(object):
         self.transforms = transforms
 
     def __call__(self, images, target):
+        if type(images) != list:  # For single-frame datasets
+            images = [images]
         for t in self.transforms:
             images, target = t(images, target)
 
@@ -61,19 +63,26 @@ class Resize(object):
         images = [F.resize(image, size) for image in images]
         if target is None:
             return images
-        target = target.resize(images[0].size)
-        return images, target
+        else:
+            target = target.resize(images[0].size)
+            return images, target
 
 
 class RandomHorizontalFlip(object):
     def __init__(self, prob=0.5):
         self.prob = prob
 
-    def __call__(self, images, target):
+    def __call__(self, images, target=None):
         if random.random() < self.prob:
             images = [F.hflip(image) for image in images]
-            target = target.transpose(0)
-        return images, target
+
+            if target is not None:
+                target = target.transpose(0)
+
+        if target is None:
+            return images
+        else:
+            return images, target
 
 
 class ColorJitter(object):
@@ -89,18 +98,24 @@ class ColorJitter(object):
             saturation=saturation,
             hue=hue,)
 
-    def __call__(self, images, target):
+    def __call__(self, images, target=None):
         images = [self.color_jitter(image) for image in images]
-        return images, target
+        if target is None:
+            return images
+        else:
+            return images, target
 
 
 class ToTensor(object):
-    def __call__(self, images, target):
+    def __call__(self, images, target=None):
         stacked_imgs = F.to_tensor(images[0]).unsqueeze(1)
         for image in images[1:]:
             im = F.to_tensor(image).unsqueeze(1)
             stacked_imgs = torch.cat((stacked_imgs, im), dim=1)
-        return stacked_imgs, target
+        if target is None:
+            return stacked_imgs
+        else:
+            return stacked_imgs, target
 
 
 class Normalize(object):

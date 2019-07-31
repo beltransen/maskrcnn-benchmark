@@ -63,13 +63,19 @@ _C.INPUT.HUE = 0.0
 # ---------------------------------------------------------------------------- #
 # INPUT Temporal information
 # ---------------------------------------------------------------------------- #
-_C.NON_LOCAL = CN()
-_C.NON_LOCAL.ENABLED = False  # Enable 4D computation
-_C.NON_LOCAL.FIRST_CTX_FRAME = 1 # 0 includes current frame, 1 to start from previous frame = 1
-_C.NON_LOCAL.RETURN_ATTENTION = False  # Returns attention maps for every non-local layer
-_C.NON_LOCAL.AT_BLOCKS = ()  # Index of Resnet blockS where non-local modules are inserted
-_C.NON_LOCAL.PATCH_SIZE = 7
-_C.NON_LOCAL.USE_BN = False
+_C.NON_LOCAL_CTX = CN()
+_C.NON_LOCAL_CTX.ENABLED = False  # Enable 4D computation
+_C.NON_LOCAL_CTX.MODULE = "StandardNL"  # StandardNL, SimplifiedNL, RegionNL, DefNL, DefSNL
+_C.NON_LOCAL_CTX.MODE = "embedded_gaussian"  # embedded_gaussian, dot_product
+_C.NON_LOCAL_CTX.FIRST_CTX_FRAME = 1  # 0 includes current frame, 1 to start from previous frame = 1
+_C.NON_LOCAL_CTX.RETURN_ATTENTION = False  # Returns attention maps for every non-local layer (for viz)
+_C.NON_LOCAL_CTX.STAGES = (4,)  # Index of Resnet blocks where non-local modules are inserted
+_C.NON_LOCAL_CTX.POSITION = "after1x1"  # after1x1, afterAdd
+_C.NON_LOCAL_CTX.BOTTLENECK_RATIO = 2  # Reduction factor for the number channels in context operation
+_C.NON_LOCAL_CTX.ZEROS_INIT = True
+_C.NON_LOCAL_CTX.USE_SCALE = True
+_C.NON_LOCAL_CTX.PATCH_SIZE = 3
+_C.NON_LOCAL_CTX.USE_BN = False
 
 # -----------------------------------------------------------------------------
 # Dataset

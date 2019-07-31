@@ -3,12 +3,17 @@ import torchvision.transforms as TT
 
 from maskrcnn_benchmark.config import cfg
 from maskrcnn_benchmark.data import transforms as T
-from maskrcnn_benchmark.structures.image_list import to_image_list
+from maskrcnn_benchmark.data.transforms import transforms_batch as TB
+from maskrcnn_benchmark.structures.image_list import to_image_list, to_4dimage_list
 from maskrcnn_benchmark.structures.bounding_box import BoxList
 from maskrcnn_benchmark.modeling.roi_heads.box_head.inference import make_roi_box_post_processor
 
 
 def im_detect_bbox_aug(model, images, device):
+    print('HOLA')
+    print(type(images))
+    print(len(images))
+    print(type(images[0]))
     # Collect detections computed under different transformations
     boxlists_ts = []
     for _ in range(len(images)):
@@ -72,6 +77,22 @@ def im_detect_bbox(model, images, target_scale, target_max_size, device):
     """
     Performs bbox detection on the original image.
     """
+    # if cfg.NON_LOCAL_CTX.ENABLED:  # Input is a 4D Tensor (Image sequences)  TODO Review
+    #     transformer = TB  # Apply the same transformations for a group of images stored in a list
+    #     images = images[0]
+    # else:
+    #     transformer = TT  # Common single image transformations
+    #
+    # transform = transformer.Compose(
+    #     [
+    #         transformer.Resize(target_scale, target_max_size),
+    #         transformer.ToTensor(),
+    #         transformer.Normalize(
+    #             mean=cfg.INPUT.PIXEL_MEAN, std=model.cfg.INPUT.PIXEL_STD, to_bgr255=cfg.INPUT.TO_BGR255
+    #         ),
+    #     ]
+    # )
+
     transform = TT.Compose([
         T.Resize(target_scale, target_max_size),
         TT.ToTensor(),
@@ -80,7 +101,12 @@ def im_detect_bbox(model, images, target_scale, target_max_size, device):
         )
     ])
     images = [transform(image) for image in images]
-    images = to_image_list(images, cfg.DATALOADER.SIZE_DIVISIBILITY)
+
+    if cfg.NON_LOCAL_CTX.ENABLED:  # Input is a 4D Tensor (Image sequences) TODO Review
+        images = torch.stack(images, dim=1)
+        images = to_4dimage_list(images, cfg.DATALOADER.SIZE_DIVISIBILITY)
+    else:
+        images = to_image_list(images, cfg.DATALOADER.SIZE_DIVISIBILITY)
     return model(images.to(device))
 
 
@@ -89,6 +115,7 @@ def im_detect_bbox_hflip(model, images, target_scale, target_max_size, device):
     Performs bbox detection on the horizontally flipped image.
     Function signature is the same as for im_detect_bbox.
     """
+
     transform = TT.Compose([
         T.Resize(target_scale, target_max_size),
         TT.RandomHorizontalFlip(1.0),

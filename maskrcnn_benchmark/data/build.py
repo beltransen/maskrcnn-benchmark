@@ -13,6 +13,10 @@ from . import samplers
 from .collate_batch import BatchCollator, BatchWithDepthCollator, BBoxAugCollator
 from .transforms import build_transforms
 
+import numpy as np
+
+def _init_fn(worker_id):
+    np.random.seed(12 + worker_id)
 
 def build_dataset(dataset_list, transforms, dataset_catalog, is_train=True):
     """
@@ -161,18 +165,20 @@ def make_data_loader(cfg, is_train=True, is_distributed=False, start_iter=0):
             dataset, sampler, aspect_grouping, images_per_gpu, num_iters, start_iter
         )
 
-        if cfg.NON_LOCAL.ENABLED:
+        if cfg.NON_LOCAL_CTX.ENABLED:
             collator = BBoxAugCollator() if not is_train and cfg.TEST.BBOX_AUG.ENABLED else \
                 BatchWithDepthCollator(cfg.DATALOADER.SIZE_DIVISIBILITY)
         else:
             collator = BBoxAugCollator() if not is_train and cfg.TEST.BBOX_AUG.ENABLED else \
                 BatchCollator(cfg.DATALOADER.SIZE_DIVISIBILITY)
         num_workers = cfg.DATALOADER.NUM_WORKERS
+
         data_loader = torch.utils.data.DataLoader(
             dataset,
             num_workers=num_workers,
             batch_sampler=batch_sampler,
             collate_fn=collator,
+            # worker_init_fn=_init_fn,  # TODO REMOVE DANGER!
         )
         data_loaders.append(data_loader)
     if is_train:

@@ -25,6 +25,9 @@ from maskrcnn_benchmark.utils.imports import import_file
 from maskrcnn_benchmark.utils.logger import setup_logger
 from maskrcnn_benchmark.utils.miscellaneous import mkdir
 
+import random
+import numpy as np
+
 # See if we can use apex.DistributedDataParallel instead of the torch default,
 # and enable mixed-precision via apex.amp
 try:
@@ -32,10 +35,17 @@ try:
 except ImportError:
     raise ImportError('Use APEX for multi-precision via apex.amp')
 
+torch.manual_seed(0)  # For reproducibility !
+torch.cuda.manual_seed_all(0)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+random.seed(0)
+np.random.seed(0)
+
 
 def train(cfg, local_rank, distributed):
     model = build_detection_model(cfg)
-    # print(model)
+    print(model)
     device = torch.device(cfg.MODEL.DEVICE)
     model.to(device)
 
@@ -59,12 +69,19 @@ def train(cfg, local_rank, distributed):
 
     output_dir = cfg.OUTPUT_DIR
 
+    # Build TensorboardX logdir path
+    log_folder = cfg.OUTPUT_DIR
+    lastindex = log_folder.rfind('/')
+    if lastindex == (len(log_folder)-1):
+        lastindex = log_folder[:-1].rfind('/')
+    logdir = log_folder[lastindex:]
+    arguments["log_dir"] = "./logs/"+logdir
+
     save_to_disk = get_rank() == 0
     checkpointer = DetectronCheckpointer(
         cfg, model, optimizer, scheduler, output_dir, save_to_disk
     )
 
-    # if not cfg.NON_LOCAL.ENABLED:  # TODO Remove when weights loader supports 4D
     extra_checkpoint_data = checkpointer.load(cfg.MODEL.WEIGHT)
     arguments.update(extra_checkpoint_data)
 
@@ -86,7 +103,7 @@ def train(cfg, local_rank, distributed):
         device,
         checkpoint_period,
         arguments,
-        # tensor4d=cfg.NON_LOCAL.ENABLED
+        # tensor4d=cfg.NON_LOCAL_CTX.ENABLED
     )
 
     return model
@@ -175,15 +192,15 @@ def main():
     logger.info("\n" + collect_env_info())
 
     logger.info("Loaded file {}".format(args.config_file))
-    # with open(args.config_file, "r") as cf:
-    #     config_str = "\n" + cf.read()
-    #     logger.info(config_str)
-    # logger.info("Running with config:\n{}".format(cfg))
+    with open(args.config_file, "r") as cf:
+        config_str = "\n" + cf.read()
+        logger.info(config_str)
+    logger.info("Running with config:\n{}".format(cfg))
 
     model = train(cfg, args.local_rank, args.distributed)
 
-    # if not args.skip_test:
-    #     run_test(cfg, model, args.distributed)
+    if not args.skip_test:
+        run_test(cfg, model, args.distributed)
 
 
 if __name__ == "__main__":

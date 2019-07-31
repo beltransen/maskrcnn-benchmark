@@ -67,16 +67,19 @@ class FPN(nn.Module):
         if isinstance(self.top_blocks, LastLevelP6P7):
             last_results = self.top_blocks(x[-1], results[-1])
             results.extend(last_results)
-        elif isinstance(self.top_blocks, LastLevelMaxPool):
+        elif isinstance(self.top_blocks, LastLevelMaxPool3d):
             last_results = self.top_blocks(results[-1])
             results.extend(last_results)
 
         return tuple(results)
 
-
 class LastLevelMaxPool(nn.Module):
     def forward(self, x):
         return [F.max_pool2d(x, 1, 2, 0)]
+
+class LastLevelMaxPool3d(nn.Module):
+    def forward(self, x):
+        return [F.max_pool3d(x, 1, (1, 2, 2), 0)]  # kernel, stride, pad, dilation=1
 
 
 class LastLevelP6P7(nn.Module):

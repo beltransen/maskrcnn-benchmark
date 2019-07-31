@@ -1,10 +1,12 @@
 MODEL:
   META_ARCHITECTURE: "GeneralizedRCNN3D"
-  WEIGHT: "catalog://ImageNetPretrained/MSRA/R-50"
+#  WEIGHT: "catalog://ImageNetPretrained/MSRA/R-50"
 #  WEIGHT: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-FPN_crowd/model_0080000.pth'
+#  WEIGHT: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-FPN-NONLOCAL-IDENTITY-2019June20v3/model_final.pth'
+  WEIGHT: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-FPN-NL-Arkansas/model_final.pth'
   BACKBONE:
     CONV_BODY: "R-50-FPN-NL"
-    FREEZE_CONV_BODY_AT: 0 # If trained from scratch, there should be no frozen layers
+    FREEZE_CONV_BODY_AT: 2 # If trained from scratch, there should be no frozen layers
   RESNETS:
     BACKBONE_OUT_CHANNELS: 256
 #  RPN_ONLY: True
@@ -27,17 +29,18 @@ MODEL:
     FEATURE_EXTRACTOR: "FPN2MLPFeatureExtractor"
     PREDICTOR: "FPNPredictor"
 DATASETS:
-  TRAIN: ("kitti_train_crowd",)
-  TEST: ("kitti_val_crowd",)
+  TRAIN: ("kitti_nl_train_crowd",)
+  TEST: ("kitti_nl_val_crowd",)
 DATALOADER:
   SIZE_DIVISIBILITY: 32
+  NUM_WORKERS: 0
 SOLVER:
-  BASE_LR: 0.000125
+  BASE_LR: 0.00125 # 0.00125
   WEIGHT_DECAY: 0.0001
   GAMMA: 0.1
-  STEPS: (160000,)
-  MAX_ITER: 190000
-  WARMUP_ITERS: 500
+  STEPS: ()
+  MAX_ITER: 180000
+#  WARMUP_ITERS: 500
   IMS_PER_BATCH: 1
   CHECKPOINT_PERIOD: 10000
 TEST:
@@ -51,7 +54,7 @@ TEST:
 
 # Size of the smallest side of the image during training
 INPUT:
-  MIN_SIZE_TRAIN: (375, 500)  # (800,)
+  MIN_SIZE_TRAIN: (500, )  # 375, 500 (800,)
   MAX_SIZE_TRAIN: 2000
   MIN_SIZE_TEST: 500
   MAX_SIZE_TEST: 2000
@@ -61,9 +64,10 @@ INPUT:
 
 NON_LOCAL:
   ENABLED: True  # Enable 4D computation
-  FRAME_COUNT: 1  # Amount of consecutive frames stacked in time dimension
-  AT_BLOCKS: (3, 4)  # Index of Resnet blockS where non-local modules are inserted
+#  FIRST_CTX_FRAME: 0  # 0 includes current frame, 1 to start from previous frame TODO DELETE (defaults.py = 1)
+  RETURN_ATTENTION: True
+  AT_BLOCKS: (4,)  # Index of Resnet blocks where non-local modules are inserted
   PATCH_SIZE: 7
-  USE_BN: False
+  USE_BN: True
 
-OUTPUT_DIR: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-FPN_NONLOCAL'
+OUTPUT_DIR: '/home/jorge/4tb/model_zoo/maskrcnn-benchmark/R-50-FPN-NL-Arkansas'

@@ -84,7 +84,7 @@ class ResNet(nn.Module):
 
         # If we want to use the cfg in forward(), then we should make a copy
         # of it and store it for later use:
-        # self.cfg = cfg.clone()
+        self.cfg = cfg.clone()
 
         # Translate string names to implementations
         stem_module = _STEM_MODULES[cfg.MODEL.RESNETS.STEM_FUNC]
@@ -128,6 +128,13 @@ class ResNet(nn.Module):
             self.stages.append(name)
             self.return_features[name] = stage_spec.return_features
 
+            # Add dummy identity layer TODO REMOVE
+            # identity_name = "identity" + str(stage_spec.index)
+            # self.add_module(identity_name, Identity2D())
+            # self.stages.append(identity_name)
+            # self.return_features[identity_name] = False
+
+
         # Optionally freeze (requires_grad=False) parts of the backbone
         self._freeze_backbone(cfg.MODEL.BACKBONE.FREEZE_CONV_BODY_AT)
 
@@ -144,12 +151,20 @@ class ResNet(nn.Module):
 
     def forward(self, x):
         outputs = []
+        # torch.manual_seed(0)
+        # x = torch.rand(x.shape).cuda()
+        # print('x', x)
+        # print('x', x.shape)
+        # print('FORWARDIIIING')
         x = self.stem(x)
         for stage_name in self.stages:
             x = getattr(self, stage_name)(x)
+            # print(getattr(self, stage_name))
             # print('{}: {}'.format(stage_name, x.shape)) # TODO REMOVE
             if self.return_features[stage_name]:
                 outputs.append(x)
+
+        # print('out', outputs)
         return outputs
 
 
@@ -460,8 +475,22 @@ class StemWithGN(BaseStem):
         super(StemWithGN, self).__init__(cfg, norm_func=group_norm)
 
 
-class Identity(nn.Module): # TODO REMOVE if Pytorch 1.1 used
+class Identity2D(nn.Module): # TODO REMOVE
     r"""A placeholder identity operator that is argument-insensitive.
+
+    Args:
+        args: any argument (unused)
+        kwargs: any keyword argument (unused)
+    """
+    def __init__(self, *args, **kwargs):
+        super(Identity2D, self).__init__()
+
+    def forward(self, input):
+        return input
+
+
+class Identity(nn.Module): # TODO REMOVE if Pytorch 1.1 used
+    """A placeholder identity operator that is argument-insensitive.
 
     Args:
         args: any argument (unused)
@@ -470,8 +499,8 @@ class Identity(nn.Module): # TODO REMOVE if Pytorch 1.1 used
     def __init__(self, *args, **kwargs):
         super(Identity, self).__init__()
 
-    def forward(self, input):
-        return input
+    def forward(self, *input):
+        return input[0][:,:,0,:,:]
 
 
 class ResNetNL(nn.Module):
@@ -480,12 +509,15 @@ class ResNetNL(nn.Module):
 
         # If we want to use the cfg in forward(), then we should make a copy
         # of it and store it for later use:
-        # self.cfg = cfg.clone()
-
+        self.cfg = cfg.clone()
         # Translate string names to implementations
         stem_module = _STEM_MODULES[cfg.MODEL.RESNETS.STEM_FUNC]
         stage_specs = _STAGE_SPECS[cfg.MODEL.BACKBONE.CONV_BODY]
         transformation_module = _TRANSFORMATION_MODULES[cfg.MODEL.RESNETS.TRANS_FUNC]
+        nonlocal_ctx_module = _NON_LOCAL_CTX_MODULES[cfg.NON_LOCAL_CTX.MODULE]
+
+        self.ctx_first = cfg.NON_LOCAL_CTX.FIRST_CTX_FRAME
+        self.return_attention_maps = cfg.NON_LOCAL_CTX.RETURN_ATTENTION
 
         # Construct the stem module
         self.stem = stem_module(cfg)
@@ -502,13 +534,17 @@ class ResNetNL(nn.Module):
         self.blocks2 = nn.ModuleList()
         self.return_features = {}
         self.nl_block = {}
+
+        cuda_devices = ['cuda:{}'.format(i) for i in range(torch.cuda.device_count()) ]
+        current_device = 0
+
         for stage_spec in stage_specs:
             name = "layer" + str(stage_spec.index)
             stage2_relative_factor = 2 ** (stage_spec.index - 1)
             bottleneck_channels = stage2_bottleneck_channels * stage2_relative_factor
             out_channels = stage2_out_channels * stage2_relative_factor
             stage_with_dcn = cfg.MODEL.RESNETS.STAGE_WITH_DCN[stage_spec.index -1]
-            non_local_enabled = cfg.NON_LOCAL.ENABLED if stage_spec.index in cfg.NON_LOCAL.AT_BLOCKS else False
+            non_local_enabled = cfg.NON_LOCAL_CTX.ENABLED if stage_spec.index in cfg.NON_LOCAL_CTX.STAGES else False
 
             # Part 1
             block1 = []
@@ -533,13 +569,16 @@ class ResNetNL(nn.Module):
                 stride = 1
                 in_channels = out_channels
 
-            self.blocks1.add_module(name, nn.Sequential(*block1))
+            self.blocks1.add_module(name, nn.Sequential(*block1).to(cuda_devices[current_device]))
 
             # NL
-            if non_local_enabled:
-                self.nonlocals.add_module(name, NLB3D(out_channels, bottleneck_channels, 7, bn_layer=False))  # TODO Check
+            layer_conf = cfg.NON_LOCAL_CTX
+            if non_local_enabled and cfg.NON_LOCAL_CTX.POSITION is "after1x1":
+                self.nonlocals.add_module(name, nonlocal_ctx_module(
+                    out_channels, cfg.NON_LOCAL_CTX.BOTTLENECK_RATIO, cfg.NON_LOCAL_CTX.ZEROS_INIT,
+                    return_attention=self.return_attention_maps, extra_args=layer_conf).to(cuda_devices[current_device]))
             else:
-                self.nonlocals.add_module(name, Identity())
+                self.nonlocals.add_module(name, Identity().to(cuda_devices[current_device]))
 
             # Part 2
             block2 = transformation_module(
@@ -556,11 +595,19 @@ class ResNetNL(nn.Module):
                             "deformable_groups": cfg.MODEL.RESNETS.DEFORMABLE_GROUPS,
                         }
                     )
-            self.blocks2.add_module(name, nn.Sequential(OrderedDict([(str(stage_spec.block_count-1), block2),])))
+            self.blocks2.add_module(name, nn.Sequential(OrderedDict([(str(stage_spec.block_count-1), block2),]))
+                                    .to(cuda_devices[current_device]))
+
+            if non_local_enabled and cfg.NON_LOCAL_CTX.POSITION is "afterAdd":
+                exit('[ERROR] AfterAdd position for NL context module not yet implemented')
+
             # self.add_module(name, module)
             self.stages.append(name)
             self.return_features[name] = stage_spec.return_features
             self.nl_block[name] = non_local_enabled
+
+            # Update device number
+            current_device = (current_device+1) % torch.cuda.device_count()
 
         # Optionally freeze (requires_grad=False) parts of the backbone
         self._freeze_backbone(cfg.MODEL.BACKBONE.FREEZE_CONV_BODY_AT)
@@ -574,130 +621,281 @@ class ResNetNL(nn.Module):
                 for p in m.parameters():
                     p.requires_grad = False
             else:
-                name = "layer" + str(stage_index+1)
+                # print('FREEZING')
+                name = "layer" + str(stage_index)
                 m1 = getattr(self.blocks1, name)
+                # print(m1)
                 for p in m1.parameters():
                     p.requires_grad = False
-                if self.nl_block[name]:
-                    m2 = getattr(self.nonlocals, name)
-                    for p in m2.parameters():
-                        p.requires_grad = False
+                # if self.nl_block[name]:
+                m2 = getattr(self.nonlocals, name)
+                # print(m2)
+                for p in m2.parameters():
+                    p.requires_grad = False
                 m3 = getattr(self.blocks2, name)
+                # print(m3)
                 for p in m3.parameters():
                     p.requires_grad = False
 
     def forward(self, x):
         outputs = []
+        #
+        # print('INPUT SHAPE: ', x.shape)
+        # print('INPUT DIMS: ', len(x.shape))
+        if len(x.shape) == 4:
+            x = x.unsqueeze(2)
+
+        # torch.manual_seed(0)
+        # x[:, :, 0, :, :] = torch.rand(x[:, :, 0, :, :].shape)
+        # print('x', x[:, :, 0, :, :])
+        # print('x', x[:, :, 0, :, :].shape)
+        # print('x', x.shape)
         xs = []
+        att_maps = dict()
         for i in range(x.shape[2]):
             xs.append(self.stem(x[:, :, i, :, :]))
 
         for s in range(len(self.stages)):
             stage_name = self.stages[s]
-            for i in range(x.shape[2]):
+            num_frames = x.shape[2]  # TODO DANGER!
+            for i in range(num_frames):
                 xs[i] = getattr(self.blocks1, stage_name)(xs[i])
-                # print('Forward {}: {}'.format(stage_name, xs[i].shape))
+                # print('[Blocks1] Forward (t-{}) {}: {}'.format(i, stage_name, getattr(self.blocks1, stage_name)))
+                # print('[Blocks1] Forward (t-{}) {}: {}'.format(i, stage_name, xs[i].shape))
+                # print(getattr(self.blocks1, stage_name))
 
+            prev_x0 = xs[0]
             if self.nl_block[stage_name]:  # TODO Remove: Not necessary? Either Identity or NL module
                 stacked = torch.stack(xs, 2)
                 # print('stacked size: ', stacked.shape)
-                xs[0] = getattr(self.nonlocals, stage_name)(stacked[:, :, 0:1, :, :], stacked[:, :, 1:, :, :])  # TODO Check
+                print('[NL] Forward (t-{}) {}: {}'.format(i, stage_name, getattr(self.nonlocals, stage_name)))
+                if self.return_attention_maps:  # TODO Add the capability to return attmaps to all nonlocal context layers
+                    # print('returniing attmaps')
+                    aux = getattr(self.nonlocals, stage_name)(stacked)
+                    # aux = getattr(self.nonlocals, stage_name)(stacked[:, :, 0:1, :, :], stacked[:, :, self.ctx_first:, :, :])
+                    if not isinstance(getattr(self.nonlocals, stage_name), Identity):
+                        xs[0], att_map = aux[0], aux[1]
+                        num_ctx_frames = x.shape[2] - self.ctx_first
+                        att_map = att_map.view(att_map.shape[0], xs[0].shape[2], xs[0].shape[3],
+                                               num_ctx_frames, att_map.shape[3]//num_ctx_frames)
+                        att_maps[stage_name] = att_map
+                else:
+                     xs[0] = getattr(self.nonlocals, stage_name)(stacked)
+                    # xs[0] = getattr(self.nonlocals, stage_name)(stacked[:, :, 0:1, :, :], stacked[:, :, self.ctx_first:, :, :])
+                # print(getattr(self.nonlocals, stage_name))
+                # if isinstance(getattr(self.nonlocals, stage_name), Identity): # TODO Review, it's not always equal!!
+                #     print("identittyyy")
+                #     print('prev', prev_x0.shape)
+                #     print('xs', xs[0].shape)
+                #     assert (torch.eq(prev_x0, xs[0]).all())
 
-            for i in range(x.shape[0]):
+            # for i in range(x.shape[0]): # TODO Changed
+            for i in range(num_frames):
                 xs[i] = getattr(self.blocks2, stage_name)(xs[i])
+                # print(getattr(self.blocks2, stage_name))
+                # print('[Blocks2] Forward (t-{}) {}: {}'.format(i, stage_name, getattr(self.blocks2, stage_name)))
+                # print('[Blocks2] Forward (t-{}) {}: {}'.format(i, stage_name, xs[i].shape))
 
             if self.return_features[stage_name]:
-                outputs.append(xs[0])  # TODO Check
+                outputs.append(xs[0])  # TODO Check: returns only the output of current frame [0] for FPN
 
         # print('Resnet outputs: ', len(outputs))
         # for i in range(len(outputs)):
         #     print('Shape output {}: {}'.format(i, outputs[i].shape))
-        return outputs
+        print('out ', outputs[3])
 
-
-class NLB3D(torch.nn.Module):
-    def __init__(self, in_channels, h_channels, patch_size, bn_layer=True):
-        super(NLB3D, self).__init__()
-        self.in_channels = in_channels
-        self.h_channels = h_channels
-        self.patch_size = patch_size
-        self.theta = torch.nn.Conv3d(in_channels, h_channels, kernel_size=1, stride=1, padding=0, bias=False)
-        self.psi = torch.nn.Conv3d(in_channels, h_channels, kernel_size=1, stride=1, padding=0, bias=False)
-        self.g = torch.nn.Conv3d(in_channels, h_channels, kernel_size=1, stride=1, padding=0, bias=False)
-
-        # TODO Check before training
-        torch.nn.init.xavier_uniform(self.theta.weight)
-        torch.nn.init.xavier_uniform(self.psi.weight)
-        torch.nn.init.xavier_uniform(self.g.weight)
-
-        if bn_layer:
-            self.W = torch.nn.Sequential(
-                torch.nn.Conv3d(in_channels=h_channels, out_channels=in_channels,
-                                kernel_size=1, stride=1, padding=0),
-                torch.nn.BatchNorm3d(in_channels)
-            )
-
-            torch.nn.init.xavier_uniform(self.W[0].weight)  # TODO Check correct initialization (Should be ZERO?)
-            torch.nn.init.constant_(self.W[1].weight, 0)
-            torch.nn.init.constant_(self.W[1].bias, 0)
+        if self.return_attention_maps:
+            return outputs, att_maps
         else:
-            self.W = torch.nn.Conv3d(in_channels=h_channels, out_channels=in_channels,
+            return outputs
+
+
+class RegionNonLocal3D(torch.nn.Module):
+    """ Region Non-local module.
+    See https://arxiv.org/abs/1711.07971 for details.
+    Args:
+        in_channels (int): Channels of the input feature map.
+        reduction (int): Channel reduction ratio.
+        zeros_init (bool): Zero weight initialization for conv_out
+        return_attention (bool): If True, attention map is returned
+        extra_args (dict): For specific layer settings:
+            - patch_size (int): Size of the region to be used
+            - bn_layer (bool): If True, BatchNorm is used after conv_out
+            - mode (str): Options are `embedded_gaussian` and `dot_product`.
+    """
+    def __init__(self, in_channels, reduction=2, zeros_init=True, return_attention=False, extra_args=None):
+        super(RegionNonLocal3D, self).__init__()
+        assert isinstance(extra_args, dict)
+        self.in_channels = in_channels
+        self.h_channels = in_channels // reduction
+        self.zeros_init = zeros_init
+        self.return_attention_map = return_attention
+        self.patch_size = extra_args['PATCH_SIZE']
+        self.bn_layer = extra_args['USE_BN']
+        self.ctx_first = extra_args['FIRST_CTX_FRAME']
+        self.mode = extra_args['MODE']
+        assert self.mode in ['embedded_gaussian', 'dot_product']
+
+        self.theta = torch.nn.Conv3d(in_channels, self.h_channels, kernel_size=1, stride=1, padding=0, bias=False)
+        self.phi = torch.nn.Conv3d(in_channels, self.h_channels, kernel_size=1, stride=1, padding=0, bias=False)
+        self.g = torch.nn.Conv3d(in_channels, self.h_channels, kernel_size=1, stride=1, padding=0, bias=False)
+
+        if self.bn_layer:
+            self.conv_out = torch.nn.Sequential(
+                torch.nn.Conv3d(in_channels=self.h_channels, out_channels=in_channels,
+                                kernel_size=1, stride=1, padding=0),
+                torch.nn.BatchNorm3d(in_channels, momentum=0.9)
+            )
+        else:
+            self.conv_out = torch.nn.Conv3d(in_channels=self.h_channels, out_channels=in_channels,
                                      kernel_size=1, stride=1, padding=0, bias=False)
-            # torch.nn.init.xavier_uniform(self.W.weight)   # TODO Check correct initialization (Should be ZERO?)
-            torch.nn.init.constant_(self.W.weight, 0)
 
-    def forward(self, x, ctx):
-        # print("NLB input: ", x.shape)
+        self.init_weights()
+
+    def init_weights(self, std=0.01):
+        for m in [self.g, self.theta, self.phi]:
+            torch.nn.init.normal_(m.weight, std=std)
+        if self.zeros_init:
+            if self.bn_layer:
+                torch.nn.init.constant_(self.conv_out[0].weight, 0)
+            else:
+                torch.nn.init.constant_(self.conv_out.weight, 0)
+        else:
+            if self.bn_layer:
+                torch.nn.init.normal_init(self.conv_out[0].weight, std=std)
+            else:
+                torch.nn.init.normal_init(self.conv_out.weight, std=std)
+
+    def embedded_gaussian(self, theta_x, phi_x):
+        # pairwise_weight: [N, HxW, HxW]
+        pairwise_weight = torch.matmul(theta_x, phi_x)
+        if self.use_scale:
+            # theta_x.shape[-1] is `self.h_channels`
+            pairwise_weight /= theta_x.shape[-1] ** -0.5
+        pairwise_weight = pairwise_weight.softmax(dim=-1)
+        return pairwise_weight
+
+    def dot_product(self, theta_x, phi_x):
+        # pairwise_weight: [N, HxW, HxW]
+        pairwise_weight = torch.matmul(theta_x, phi_x)
+        pairwise_weight /= pairwise_weight.shape[-1]
+        return pairwise_weight
+
+    def forward(self, x):
+        x_i, ctx = x[:, :, 0:1, :, :], x[:, :, self.ctx_first:, :, :]
+        assert (x_i.shape[2] % 2 != 0)
+        # print("NLB input: ", x_i.shape)
         # print("NLB ctx: ", ctx.shape)
-        assert (x.shape[2] % 2 != 0)
-
         #     out_theta = self.theta(x) # To get attention map for every stacked frames
         # x_i = x[:, :, x.shape[2] // 2:x.shape[2] // 2 + 1, :, :]  # Current frame
-        x_i = x  # Current frame
+        # x_i = x  # Current frame
+        # assert (x.shape[2] % 2 != 0)
+        # print("NLB input: ", x.shape)
+        # print("NLB ctx: ", ctx.shape)
         theta_x_i = self.theta(x_i)
         theta_x_i = theta_x_i.unsqueeze(-1)  # Add a dimension at the end
         theta_x_i = theta_x_i.view(theta_x_i.shape[0], theta_x_i.shape[1], -1, theta_x_i.shape[-1])
         #     print("theta_x_i: ", theta_x_i.shape)
 
         padding = self.patch_size // 2
-        #     padding = 0 # TODO REMOVE
-        #     x_pad = F.pad(x, (padding,padding,padding,padding,padding,padding)) # TODO Review T dimension padding (activated now)
 
-        # CHANGED TO ctx instead of original 'x' tensor
-        x_pad = F.pad(ctx, (padding, padding, padding, padding, 0, 0), mode='replicate')  # TODO Review T dimension padding (deactivated now)
-        #     patches  = x_pad.unfold(2, 3, 1)
-        #     print('patches size:', patches.shape)
-        patches = x_pad.unfold(3, self.patch_size, 1)
-        #     print('patches size:', patches.shape)
-        patches = patches.unfold(4, self.patch_size, 1)
-        #     patches = x_pad.unfold(2, 3, 1).unfold(3, self.patch_size, 1).unfold(4, self.patch_size, 1)
-        #     patches = patches.contiguous().view(patches.shape[0], patches.shape[1], patches.shape[2], -1, patches.shape[-2] * patches.shape[-1])
-        #     print('patches size:', patches.shape)
-        patches = patches.contiguous().view(patches.shape[0], patches.shape[1], patches.shape[2],
-                                            patches.shape[3] * patches.shape[4], -1)
-        #     print('patches size:', patches.shape)
-
-        psi_patches = self.psi(patches)
-        psi_patches = psi_patches.permute(0, 1, 3, 2, 4)
-        psi_patches = psi_patches.contiguous().view(psi_patches.shape[0], psi_patches.shape[1], psi_patches.shape[2],
-                                                    -1)
-        g_patches = self.g(patches)
-        g_patches = g_patches.permute(0, 1, 3, 2, 4)
-        g_patches = g_patches.contiguous().view(g_patches.shape[0], g_patches.shape[1], g_patches.shape[2], -1)
-
-        #     print("psi_patches: ", psi_patches.shape)
-        #     print("g_patches: ", g_patches.shape)
+        ## TODO NEW APPROACH
 
         theta_x_i = theta_x_i.permute(0, 2, 3, 1)
-        psi_patches = psi_patches.permute(0, 2, 1, 3)
-        g_patches = g_patches.permute(0, 2, 3, 1)
+
+        phi_x_i = self.phi(ctx)
+        #         phi_x_i = F.max_pool3d(phi_x_i, kernel_size=(1,2,2), stride=(1,2,2))
+        #         phi_x_i = phi_x_i.unsqueeze(-1)  # Add a dimension at the end
+        #         phi_x_i = phi_x_i.view(phi_x_i.shape[0], phi_x_i.shape[1], -1, phi_x_i.shape[-1])
+        phi_x_i_pad = F.pad(phi_x_i, (padding, padding, padding, padding, 0, 0),
+                            mode='replicate')  # TODO Review T dimension padding (deactivated now)
+        phi_patches = phi_x_i_pad.unfold(3, self.patch_size, 1)
+        phi_patches = phi_patches.unfold(4, self.patch_size, 1)
+        phi_patches = phi_patches.contiguous().view(phi_patches.shape[0], phi_patches.shape[1], phi_patches.shape[2],
+                                                    phi_patches.shape[3] * phi_patches.shape[4], -1)
+
+        phi_patches = phi_patches.permute(0, 3, 1, 2, 4)
+        phi_patches = phi_patches.contiguous().view(phi_patches.shape[0], phi_patches.shape[1], phi_patches.shape[2],
+                                                    -1)
+        #         print('phi_patches size:', phi_patches.element_size() * phi_patches.nelement())
+
+        g_x_i = self.g(ctx)
+        # print('G size:', g_x_i.shape)
+        #         g_x_i = F.max_pool3d(g_x_i, kernel_size=(1,2,2), stride=(1,2,2))
+        # print('G pooled size:', g_x_i.shape)
+        #         g_x_i = g_x_i.unsqueeze(-1)  # Add a dimension at the end
+        #         g_x_i = g_x_i.view(g_x_i.shape[0], g_x_i.shape[1], -1, g_x_i.shape[-1])
+        g_x_i_pad = F.pad(g_x_i, (padding, padding, padding, padding, 0, 0),
+                          mode='replicate')  # TODO Review T dimension padding (deactivated now)
+        g_patches = g_x_i_pad.unfold(3, self.patch_size, 1)
+        g_patches = g_patches.unfold(4, self.patch_size, 1)
+        g_patches = g_patches.contiguous().view(g_patches.shape[0], g_patches.shape[1], g_patches.shape[2],
+                                                g_patches.shape[3] * g_patches.shape[4], -1)
+        g_patches = g_patches.permute(0, 3, 1, 2, 4)
+        g_patches = g_patches.contiguous().view(g_patches.shape[0], g_patches.shape[1], -1, g_patches.shape[2])
+        #         print('g_patches size:', g_patches.element_size() * g_patches.nelement())
+
+        # print('theta_x_i size:', theta_x_i.shape)
+        # print('phi_x_i size:', phi_x_i.shape)
+        # print('g_x_i size:', g_x_i.shape)
+        # print('phi_patches size:', phi_patches.shape)
+        # print('g_patches size:', g_patches.shape)
+
+        ## TODO END NEW APPROACH
+
+
+        ## TODO OLD APPROACH
+        # #     padding = 0 # TODO REMOVE
+        # #     x_pad = F.pad(x, (padding,padding,padding,padding,padding,padding)) # TODO Review T dimension padding (activated now)
+        #
+        # # CHANGED TO ctx instead of original 'x' tensor
+        # x_pad = F.pad(ctx, (padding, padding, padding, padding, 0, 0), mode='replicate')  # TODO Review T dimension padding (deactivated now)
+        # #     patches  = x_pad.unfold(2, 3, 1)
+        # #     print('patches size:', patches.shape)
+        # patches = x_pad.unfold(3, self.patch_size, 1)
+        # #     print('patches size:', patches.shape)
+        # patches = patches.unfold(4, self.patch_size, 1)
+        # #     patches = x_pad.unfold(2, 3, 1).unfold(3, self.patch_size, 1).unfold(4, self.patch_size, 1)
+        # #     patches = patches.contiguous().view(patches.shape[0], patches.shape[1], patches.shape[2], -1, patches.shape[-2] * patches.shape[-1])
+        # #     print('patches size:', patches.shape)
+        # patches = patches.contiguous().view(patches.shape[0], patches.shape[1], patches.shape[2],
+        #                                     patches.shape[3] * patches.shape[4], -1)
+        # #     print('patches size:', patches.shape)
+        #
+        # phi_patches = self.phi(patches)
+        # phi_patches = phi_patches.permute(0, 1, 3, 2, 4)
+        # phi_patches = phi_patches.contiguous().view(phi_patches.shape[0], phi_patches.shape[1], phi_patches.shape[2],
+        #                                             -1)
+        # g_patches = self.g(patches)
+        # g_patches = g_patches.permute(0, 1, 3, 2, 4)
+        # g_patches = g_patches.contiguous().view(g_patches.shape[0], g_patches.shape[1], g_patches.shape[2], -1)
+        #
+        # #     print("phi_patches: ", phi_patches.shape)
+        # #     print("g_patches: ", g_patches.shape)
+        #
+        # theta_x_i = theta_x_i.permute(0, 2, 3, 1)
+        # phi_patches = phi_patches.permute(0, 2, 1, 3)
+        # g_patches = g_patches.permute(0, 2, 3, 1)
+
+        ## TODO END OLD APPROACH
 
         #     print("theta_x_i: ", theta_x_i.shape)
-        #     print("psi_patches: ", psi_patches.shape)
+        #     print("phi_patches: ", phi_patches.shape)
         #     print("g_patches: ", g_patches.shape)
 
-        att_map = torch.einsum('bpij,bpjk->bpik', theta_x_i, psi_patches)
-        att_map2 = F.softmax(att_map, dim=3)
+        # # TODO REVIEW IF THIS SNIPPET CAN BE USED
+        # pairwise_func = getattr(self, self.mode)
+        # # pairwise_weight: [N, TxHxW, TxHxW]
+        # pairwise_weight = pairwise_func(theta_x_i, phi_patches)
+        #
+        # # y: [N, TxHxW, C]
+        # y = torch.matmul(pairwise_weight, g_patches)
+        #
+        # # END OF SNIPPET
+
+        att_map = torch.einsum('bpij,bpjk->bpik', theta_x_i, phi_patches)
+        att_map /= theta_x_i.shape[-1]**-0.5
+        att_map2 = F.softmax(att_map, dim=-1)
         #     print("att_map: ", att_map2.shape)
         #     print("att_map ", att_map2)
         y = torch.einsum('bpij,bpjk->bpik', att_map2, g_patches)
@@ -705,14 +903,226 @@ class NLB3D(torch.nn.Module):
         y = y.view(x_i.shape[0], self.h_channels,
                    x_i.shape[2], x_i.shape[3], x_i.shape[4])
 
-        W_y = self.W(y)
+        W_y = self.conv_out(y)
         # print("y ", W_y.shape)
-        z = x + W_y  # skip connection TODO Check summation (att map computed for middle channel and added to all of them)
+        # z = x + W_y  # skip connection TODO Check summation (att map computed for middle channel and added to all of them)
+        z = x_i + W_y  # skip connection TODO Changed to x_i
         # print('NLB output: ', z.shape)
         #     print('theta: ', self.theta.weight)
-        return z.squeeze(2)  #, W_y, theta_x_i, psi_patches, g_patches
+
+        if self.return_attention_map:
+            return z.squeeze(2), att_map2  #, W_y, theta_x_i, phi_patches, g_patches
+        else:
+            return z.squeeze(2)
 
 
+class NonLocal3D(torch.nn.Module):
+    """Non-local module.
+    See https://arxiv.org/abs/1711.07971 for details.
+    Args:
+        in_channels (int): Channels of the input feature map.
+        reduction (int): Channel reduction ratio.
+        zeros_init (bool): Zero weight initialization for conv_out
+        return_attention (bool): If True, attention map is returned
+        extra_args (dict): For specific layer settings:
+            - use_scale (bool): Whether to scale pairwise_weight by 1/h_channels.
+            - mode (str): Options are `embedded_gaussian` and `dot_product`.
+    """
+
+    def __init__(self, in_channels, reduction=2, zeros_init=True, return_attention=False, extra_args=None):
+        super(NonLocal3D, self).__init__()
+        self.in_channels = in_channels
+        self.h_channels = in_channels // reduction
+        self.zeros_init = zeros_init
+        self.return_attention_map = return_attention
+        self.use_scale = extra_args['USE_SCALE']
+        self.mode = extra_args['MODE']
+        assert self.mode in ['embedded_gaussian', 'dot_product']
+        print('Mode: ', self.mode)
+
+        # g, theta, phi are actually `nn.Conv2d`. Here we use ConvModule for
+        # potential usage.
+        self.g = torch.nn.Conv3d(self.in_channels, self.h_channels, kernel_size=1, stride=1, padding=0, bias=False)
+        self.theta = torch.nn.Conv3d(self.in_channels, self.h_channels, kernel_size=1, stride=1, padding=0,
+                                     bias=False)
+        self.phi = torch.nn.Conv3d(self.in_channels, self.h_channels, kernel_size=1, stride=1, padding=0,
+                                   bias=False)
+        self.conv_out = torch.nn.Conv3d(self.h_channels, self.in_channels, kernel_size=1, stride=1, padding=0,
+                                        bias=False)
+
+        self.init_weights()
+
+    def init_weights(self, std=0.01):
+        for m in [self.g, self.theta, self.phi]:
+            torch.nn.init.normal_(m.weight, std=std)
+        if self.zeros_init:
+            torch.nn.init.constant_(self.conv_out.weight, 0)
+        else:
+            torch.nn.init.normal_init(self.conv_out.weight, std=std)
+
+    def embedded_gaussian(self, theta_x, phi_x):
+        # pairwise_weight: [N, HxW, HxW]
+        pairwise_weight = torch.matmul(theta_x, phi_x)
+        if self.use_scale:
+            # theta_x.shape[-1] is `self.h_channels`
+            pairwise_weight /= theta_x.shape[-1] ** -0.5
+        pairwise_weight = pairwise_weight.softmax(dim=-1)
+        return pairwise_weight
+
+    def dot_product(self, theta_x, phi_x):
+        # pairwise_weight: [N, HxW, HxW]
+        pairwise_weight = torch.matmul(theta_x, phi_x)
+        pairwise_weight /= pairwise_weight.shape[-1]
+        return pairwise_weight
+
+    def forward(self, x):
+        n, _, t, h, w = x.shape
+
+        # g_x: [N, TxHxW, C]
+        g_x = self.g(x).view(n, self.h_channels, -1)
+        g_x = g_x.permute(0, 2, 1)
+
+        # theta_x: [N, TxHxW, C]
+        theta_x = self.theta(x).view(n, self.h_channels, -1)
+        theta_x = theta_x.permute(0, 2, 1)
+
+        # phi_x: [N, C, TxHxW]
+        phi_x = self.phi(x).view(n, self.h_channels, -1)
+
+        pairwise_func = getattr(self, self.mode)
+        # pairwise_weight: [N, TxHxW, TxHxW]
+        pairwise_weight = pairwise_func(theta_x, phi_x)
+
+        # y: [N, TxHxW, C]
+        y = torch.matmul(pairwise_weight, g_x)
+        # y: [N, C, T, H, W]
+        y = y.permute(0, 2, 1).reshape(n, self.h_channels, t, h, w)
+
+        output = x + self.conv_out(y)
+
+        return output
+
+
+class SimpleNonLocal3D(torch.nn.Module):
+    """ Simplified Non-local module.
+    See https://arxiv.org/abs/1711.07971 for details.
+    Args:
+        in_channels (int): Channels of the input feature map.
+        reduction (int): Channel reduction ratio.
+        zeros_init (bool): Zero weight initialization for conv_out
+        return_attention (bool): If True, attention map is returned
+        extra_args (dict): For specific layer settings (unused)
+    """
+
+    def __init__(self, in_channels, reduction=-1, zeros_init=True, return_attention=False, extra_args=None):
+        super(SimpleNonLocal3D, self).__init__()
+        self.in_channels = in_channels
+        self.h_channels = 1 # if reduction == -1 else in_channels // reduction  # TODO Check if anything different than 1 makes sense
+        self.zeros_init = zeros_init
+        self.return_attention_map = return_attention
+
+        self.phi = torch.nn.Conv3d(self.in_channels, self.h_channels,
+                                   kernel_size=1, stride=1, padding=0, bias=False)
+        self.conv_out = torch.nn.Conv3d(self.in_channels, self.in_channels,
+                                        kernel_size=1, stride=1, padding=0, bias=False)
+
+        self.init_weights()
+
+    def init_weights(self, std=0.01):
+        torch.nn.init.normal_(self.phi.weight)
+        if self.zeros_init:
+            torch.nn.init.constant_(self.conv_out.weight, 0)
+        else:
+            torch.nn.init.normal_(self.conv_out.weight, std)
+
+    def forward(self, x):
+        n, c, t, h, w = x.shape
+
+        # x_flat: [N, C, TxHxW]
+        x_flat = x.view(n, c, -1)
+
+        # phi_x: [N, TxHxW, 1]
+        phi_x = self.phi(x)
+        phi_x = phi_x.view(n, -1, self.h_channels)
+
+        # att_map: [N, TxHxW, 1]
+        att_map = phi_x.softmax(dim=1)
+
+        # y: [N, C, 1, 1, 1]
+        y = torch.matmul(x_flat, att_map)
+        y = y.unsqueeze(-1).unsqueeze(-1)
+
+        # Skip connection
+        # TODO Review: Global ctx added to current frame only(index: 0).
+        z = x[:,:,0:1,:,:] + self.conv_out(y)
+
+        return z.squeeze(2)
+
+
+class DeformableNonLocal3D(torch.nn.Module):
+    """ Deformable Non-local module.
+    See https://arxiv.org/abs/1711.07971 for details.
+    Args:
+        in_channels (int): Channels of the input feature map.
+        zeros_init (bool): True (default) for initializing conv_out to zero
+    """
+
+    def __init__(self,
+                 in_channels,
+                 zeros_init=True, ):
+        super(DeformableNonLocal3D, self).__init__()
+        self.in_channels = in_channels
+        self.zeros_init = zeros_init
+        self.h_channels = 1
+        self.phi = torch.nn.Conv3d(self.in_channels, self.h_channels,
+                                   kernel_size=1, stride=1, padding=0, bias=False)
+        self.conv_out = torch.nn.Conv3d(self.in_channels, self.in_channels,
+                                        kernel_size=1, stride=1, padding=0, bias=False)
+
+        self.init_weights()
+
+    def init_weights(self, std=0.01):
+        torch.nn.init.normal_(self.phi.weight)
+        if self.zeros_init:
+            torch.nn.init.constant_(self.conv_out.weight, 0)
+        else:
+            torch.nn.init.normal_(self.conv_out.weight)
+
+    def forward(self, x):
+        exit('[ERROR] DeformableNonLocal3D not yet implemented')
+
+
+class DeformableSimpleNonLocal3D(torch.nn.Module):
+    """ Deformable Simplified Non-local module.
+    See https://arxiv.org/abs/1711.07971 for details.
+    Args:
+        in_channels (int): Channels of the input feature map.
+        zeros_init (bool): True (default) for initializing conv_out to zero
+    """
+
+    def __init__(self,
+                 in_channels,
+                 zeros_init=True, ):
+        super(DeformableSimpleNonLocal3D, self).__init__()
+        self.in_channels = in_channels
+        self.zeros_init = zeros_init
+        self.h_channels = 1
+        self.phi = torch.nn.Conv3d(self.in_channels, self.h_channels,
+                                   kernel_size=1, stride=1, padding=0, bias=False)
+        self.conv_out = torch.nn.Conv3d(self.in_channels, self.in_channels,
+                                        kernel_size=1, stride=1, padding=0, bias=False)
+
+        self.init_weights()
+
+    def init_weights(self, std=0.01):
+        torch.nn.init.normal_(self.phi.weight)
+        if self.zeros_init:
+            torch.nn.init.constant_(self.conv_out.weight, 0)
+        else:
+            torch.nn.init.normal_(self.conv_out.weight)
+
+    def forward(self, x):
+        exit('[ERROR] DeformableSimpleNonLocal3D not yet implemented')
 
 
 _TRANSFORMATION_MODULES = Registry({
@@ -725,6 +1135,14 @@ _STEM_MODULES = Registry({
     "StemBN": StemBN,
     "StemWithFixedBatchNorm": StemWithFixedBatchNorm,
     "StemWithGN": StemWithGN,
+})
+
+_NON_LOCAL_CTX_MODULES = Registry({
+    "StandardNL": NonLocal3D,
+    "SimplifiedNL": SimpleNonLocal3D,
+    "RegionNL": RegionNonLocal3D,
+    # "DefNL": DeformableNonLocal3D,
+    # "DefSNL": DeformableSimpleNonLocal3D,
 })
 
 _STAGE_SPECS = Registry({
